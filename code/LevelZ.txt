@@ -1,0 +1,1000 @@
+
+//@version=5
+indicator('LevelZ', shorttitle='LevelZ', overlay=true)
+import czoa/SetSessionTimes/1 as Session
+
+//parameters
+session_type = input.string(defval='Day Session (RTH)', options=['Day Session (RTH)', 'Custom'],
+  title='Select Session Type (no need for stocks)', group='SESSION & INITIAL BALANCE',
+  tooltip = '-For futures, select RTH and the script will auto load the corresponding session times for your contract\n-Stocks will auto-set regardless of the selection here\n-Select Custom to override auto selection with the session times you select in the next parameter box.')
+custom_session_times_inp = input.session(defval="0830-1500", title = 'Custom Session', group='SESSION & INITIAL BALANCE')
+
+todop = input.bool(title='Open RTH Session', defval=true, inline='trthop', group='Today\'s RTH session')
+todopcol = input.color(title='', defval=color.new(color.purple, 20), inline='trthop', group='Today\'s RTH session')
+todopwidth = input.int(title='', defval=2, inline='trthop', group='Today\'s RTH session')
+
+todmidwidth = input.int(title='', defval=1, inline='trthmi', group='Today\'s RTH session')
+todhi = input.bool(title='High RTH Session', defval=true, inline='trthhi', group='Today\'s RTH session')
+todhicol = input.color(title='', defval=color.new(color.purple, 20), inline='trthhi', group='Today\'s RTH session')
+todhiwidth = input.int(title='', defval=1, inline='trthhi', group='Today\'s RTH session')
+todlo = input.bool(title='Low RTH Session', defval=true, inline='trthlo', group='Today\'s RTH session')
+todlocol = input.color(title='', defval=color.new(color.purple, 20), inline='trthlo', group='Today\'s RTH session')
+todlowidth = input.int(title='', defval=1, inline='trthlo', group='Today\'s RTH session')
+
+onhi = input.bool(title='High ON Session', defval=true, inline='onhi', group='Today\'s Overnight session')
+onhicol = input.color(title='', defval=color.new(color.gray, 20), inline='onhi', group='Today\'s Overnight session')
+onhiwidth = input.int(title='', defval=1, inline='onhi', group='Today\'s Overnight session')
+onlo = input.bool(title='Low ON Session', defval=true, inline='onlo', group='Today\'s Overnight session')
+onlocol = input.color(title='', defval=color.new(color.gray, 20), inline='onlo', group='Today\'s Overnight session')
+onlowidth = input.int(title='', defval=1, inline='onlo', group='Today\'s Overnight session')
+
+
+rthop = input.bool(title='Open RTH Session', defval=true, inline='yrthop', group='Yesterday\'s RTH session')
+rthopcol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthop', group='Yesterday\'s RTH session')
+rthopwidth = input.int(title='', defval=2, inline='yrthop', group='Yesterday\'s RTH session')
+rthcl = input.bool(title='Close RTH Session', defval=true, inline='yrthcl', group='Yesterday\'s RTH session')
+rthclcol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthcl', group='Yesterday\'s RTH session')
+rthclwidth = input.int(title='', defval=2, inline='yrthcl', group='Yesterday\'s RTH session')
+
+rthhi = input.bool(title='High RTH Session', defval=true, inline='yrthhi', group='Yesterday\'s RTH session')
+rthhicol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthhi', group='Yesterday\'s RTH session')
+rthhiwidth = input.int(title='', defval=1, inline='yrthhi', group='Yesterday\'s RTH session')
+rthlo = input.bool(title='Low RTH Session', defval=true, inline='yrthlo', group='Yesterday\'s RTH session')
+rthlocol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthlo', group='Yesterday\'s RTH session')
+rthlowidth = input.int(title='', defval=1, inline='yrthlo', group='Yesterday\'s RTH session')
+
+bgON = input.bool(title='Different Background Outside of session times', defval=false, inline='ONcol', group='MORE SETTINGS')
+colON = input.color(title='', defval=color.new(color.gray, 93), inline='ONcol', group='MORE SETTINGS')
+display_value = input.bool(true, title='Show Price Values in Labels', group='MORE SETTINGS')
+nbarsforward = input.int(title='Offsset labels N bars to the right of last bar', defval=20, group='MORE SETTINGS')
+multforward = input.float(title="Multiply offset for yesterday's labels by", defval= 1, minval = 0.25, step = 0.25, group='MORE SETTINGS')
+label_size = input.string('small', options=['auto', 'tiny', 'small', 'normal', 'large', 'huge'], title='Label size', group='MORE SETTINGS')
+
+// Rounding levels to min tick
+nround(x) =>
+    n = math.round(x / syminfo.mintick) * syminfo.mintick
+    n
+l_size = label_size == 'auto' ? size.auto : label_size == 'tiny' ? size.tiny : label_size == 'small' ? size.small : label_size == 'normal' ? size.normal : label_size == 'large' ? size.large : size.huge
+
+//variables
+var float rth_op = na
+var float rth_cl = na
+var float rth_hi = na
+var float rth_lo = na
+var float rth_mid = na
+
+var float on_hi = na
+var float on_lo = na
+var float on_mid = na
+
+var float yest_rth_op = na
+var float yest_rth_cl = na
+var float yest_rth_mid = na
+var float yest_rth_hi = na
+var float yest_rth_lo = na
+
+var int index_on_start = na
+var int index_rth_start = na
+
+var yest_offset = math.round(multforward*nbarsforward)
+
+//try to automatically load session times for futures contracts
+[session_times, session_timezone] = Session.SetSessionTimes(session_type, custom_session_times_inp, syminfo.type, syminfo.root, syminfo.timezone)
+
+//CHECK WHETHER WE ARE IN SESSION
+session = na(time(timeframe.period, session_times)) ? false : true
+
+//optionally color background outside of RTH session
+color bgcol = na
+if not session and timeframe.isintraday and bgON
+    bgcol := colON
+
+bgcolor(bgcol)
+
+
+//CALCULATE IF THIS IS AN INTRADAY CHART AND START ONLY 3 DAYS AGO (no need to calculate all bars)
+if timeframe.isintraday and time > last_bar_time - 5*24*60*60*1000
+    //if we are insider RTH
+    if session
+        //calculate RTH values
+        rth_op := na(rth_op) ? open : rth_op
+        rth_hi := na(rth_hi) or high > rth_hi[1] ? high : rth_hi[1]
+        rth_lo := na(rth_lo) or low < rth_lo[1] ? low : rth_lo[1]
+        rth_cl := close
+        rth_mid := (rth_hi + rth_lo) / 2
+        
+        //if this is the first bar of the new RTH session, save its index
+        if not session[1]
+            index_rth_start := bar_index
+        
+        [true]
+    else
+        //we are in ON session
+        //if ON session just started, save RTH levels and reset everything
+        if session[1]
+            index_on_start := bar_index
+            //turn RTH values into yesterday's
+            yest_rth_op := rth_op
+            yest_rth_cl := rth_cl
+            yest_rth_hi := rth_hi
+            yest_rth_lo := rth_lo
+            yest_rth_mid := rth_mid
+            //reset variables
+            index_rth_start := na
+            on_hi := na
+            on_lo := na
+            rth_op := na
+            rth_cl := na
+            rth_hi := na
+            rth_lo := na
+            rth_mid := na
+
+        //calculate ON values
+        on_hi := na(on_hi) or high > on_hi[1] ? high : on_hi[1]
+        on_lo := na(on_lo) or low < on_lo[1] ? low : on_lo[1]
+        on_mid := (on_hi + on_lo) / 2
+
+        [true]
+    
+    //create all lines and labels in last bar and update their position
+    if barstate.islast
+        //draw levels
+        //today's RTH levels
+        var op_line = todop ? line.new(index_rth_start, rth_op, index_rth_start + nbarsforward, rth_op, xloc=xloc.bar_index, color=todopcol, width=todopwidth, style=line.style_dotted) : na
+        var hi_line = todhi ? line.new(index_rth_start, rth_hi, index_rth_start + nbarsforward, rth_hi, xloc=xloc.bar_index, color=todhicol, width=todhiwidth) : na
+        var lo_line = todlo ? line.new(index_rth_start, rth_lo, index_rth_start + nbarsforward, rth_lo, xloc=xloc.bar_index, color=todlocol, width=todlowidth) : na
+        //ON levels
+        var onhi_line = onhi ? line.new(index_on_start, on_hi, index_on_start + nbarsforward, on_hi, xloc=xloc.bar_index, color=onhicol, width=onhiwidth) : na
+        var onlo_line = onlo ? line.new(index_on_start, on_lo, index_on_start + nbarsforward, on_lo, xloc=xloc.bar_index, color=onlocol, width=onlowidth) : na
+        //yesterday's RTH levels
+        var rthcl_line = rthcl ? line.new(index_on_start, yest_rth_cl, index_on_start + yest_offset, yest_rth_cl, xloc=xloc.bar_index, color=rthclcol, width=rthclwidth) : na
+        var rthop_line = rthop ? line.new(index_on_start, yest_rth_op, index_on_start + yest_offset, yest_rth_op, xloc=xloc.bar_index, color=rthopcol, width=rthopwidth, style=line.style_dotted) : na
+        var rthhi_line = rthhi ? line.new(index_on_start, yest_rth_hi, index_on_start + yest_offset, yest_rth_hi, xloc=xloc.bar_index, color=rthhicol, width=rthhiwidth) : na
+        var rthlo_line = rthlo ? line.new(index_on_start, yest_rth_lo, index_on_start + yest_offset, yest_rth_lo, xloc=xloc.bar_index, color=rthlocol, width=rthlowidth) : na
+
+        //draw labels
+        //today
+        var label_op = todop ? label.new(bar_index + nbarsforward, rth_op, xloc=xloc.bar_index, text=display_value ? 'open ' + str.tostring(nround(rth_op)) : 'op', style=label.style_none, textcolor=todopcol, textalign =text.align_left, size=l_size) : na
+        var label_hi = todhi ? label.new(bar_index + nbarsforward, rth_hi, xloc=xloc.bar_index, text=display_value ? 'HOD ' + str.tostring(nround(rth_hi)) : 'hi', style=label.style_none, textcolor=todhicol, textalign =text.align_left, size=l_size) : na
+        var label_lo = todlo ? label.new(bar_index + nbarsforward, rth_lo, xloc=xloc.bar_index, text=display_value ? 'LOD ' + str.tostring(nround(rth_lo)) : 'lo', style=label.style_none, textcolor=todlocol, textalign =text.align_left, size=l_size) : na
+        //overnight
+        var label_on_hi = onhi ? label.new(bar_index + nbarsforward, on_hi, xloc=xloc.bar_index, text=display_value ? 'OVNH ' + str.tostring(nround(on_hi)) : 'ON.hi', style=label.style_none, textcolor=onhicol, textalign =text.align_left, size=l_size) : na
+        var label_on_lo = onlo ? label.new(bar_index + nbarsforward, on_lo, xloc=xloc.bar_index, text=display_value ? 'OVNL ' + str.tostring(nround(on_lo)) : 'ON.lo', style=label.style_none, textcolor=onlocol, textalign =text.align_left, size=l_size) : na
+        //yesterday
+        var label_rth_cl = rthcl ? label.new(bar_index + yest_offset, yest_rth_cl, xloc=xloc.bar_index, text=display_value ? 'Prior Close ' + str.tostring(nround(yest_rth_cl)) : 'y.RTH.cl', style=label.style_none, textcolor=rthclcol, textalign = text.align_left, size=l_size) : na
+        var label_rth_op = rthop ? label.new(bar_index + yest_offset, yest_rth_op, xloc=xloc.bar_index, text=display_value ? 'Prior Open ' + str.tostring(nround(yest_rth_op)) : 'y.RTH.op', style=label.style_none, textcolor=rthopcol, textalign = text.align_left, size=l_size) : na
+        var label_rth_hi = rthhi ? label.new(bar_index + yest_offset, yest_rth_hi, xloc=xloc.bar_index, text=display_value ? 'PH ' + str.tostring(nround(yest_rth_hi)) : 'y.RTH.hi', style=label.style_none, textcolor=rthhicol, textalign = text.align_left, size=l_size) : na
+        var label_rth_lo = rthlo ? label.new(bar_index + yest_offset, yest_rth_lo, xloc=xloc.bar_index, text=display_value ? 'PL ' + str.tostring(nround(yest_rth_lo)) : 'y.RTH.lo', style=label.style_none, textcolor=rthlocol, textalign = text.align_left, size=l_size) : na
+
+        
+        //update vertical location of lines and labels and label price if displayed
+        //today's
+        if rth_op != rth_op[1]
+            line.set_y1(op_line, rth_op)
+            line.set_y2(op_line, rth_op)
+            label.set_y(label_op, rth_op)
+            if display_value
+                label.set_text(label_op, 'open ' + str.tostring(nround(rth_op)))
+        if rth_hi != rth_hi[1]
+            line.set_y1(hi_line, rth_hi)
+            line.set_y2(hi_line, rth_hi)
+            label.set_y(label_hi, rth_hi)
+            if display_value
+                label.set_text(label_hi, 'HOD ' + str.tostring(nround(rth_hi)))
+        if rth_lo != rth_lo[1]
+            line.set_y1(lo_line, rth_lo)
+            line.set_y2(lo_line, rth_lo)
+            label.set_y(label_lo, rth_lo)
+            if display_value
+                label.set_text(label_lo, 'LOD ' + str.tostring(nround(rth_lo)))
+       
+        if on_hi != on_hi[1]
+            line.set_y1(onhi_line, on_hi)
+            line.set_y2(onhi_line, on_hi)
+            label.set_y(label_on_hi, on_hi)
+            if display_value
+                label.set_text(label_on_hi, 'OVNH ' + str.tostring(nround(on_hi)))
+        if on_lo != on_lo[1]
+            line.set_y1(onlo_line, on_lo)
+            line.set_y2(onlo_line, on_lo)
+            label.set_y(label_on_lo, on_lo)
+            if display_value
+                label.set_text(label_on_lo, 'OVNL ' + str.tostring(nround(on_lo)))
+       
+        if yest_rth_cl != yest_rth_cl[1]
+            line.set_y1(rthcl_line, yest_rth_cl)
+            line.set_y2(rthcl_line, yest_rth_cl)
+            label.set_y(label_rth_cl, yest_rth_cl)
+            if display_value
+                label.set_text(label_rth_cl, 'Prior Close ' + str.tostring(nround(yest_rth_cl)))
+        if yest_rth_op != yest_rth_op[1]
+            line.set_y1(rthop_line, yest_rth_op)
+            line.set_y2(rthop_line, yest_rth_op)
+            label.set_y(label_rth_op, yest_rth_op)
+            if display_value
+                label.set_text(label_rth_op, 'Prior Open ' + str.tostring(nround(yest_rth_op)))
+        if yest_rth_hi != yest_rth_hi[1]
+            line.set_y1(rthhi_line, yest_rth_hi)
+            line.set_y2(rthhi_line, yest_rth_hi)
+            label.set_y(label_rth_hi, yest_rth_hi)
+            if display_value
+                label.set_text(label_rth_hi, 'PH' + str.tostring(nround(yest_rth_hi)))
+        if yest_rth_lo != yest_rth_lo[1]
+            line.set_y1(rthlo_line, yest_rth_lo)
+            line.set_y2(rthlo_line, yest_rth_lo)
+            label.set_y(label_rth_lo, yest_rth_lo)
+            if display_value
+                label.set_text(label_rth_lo, 'PL ' + str.tostring(nround(yest_rth_lo)))
+       
+        
+  
+        //move right end of all lines
+        line.set_x2(op_line, bar_index + nbarsforward)
+        line.set_x2(hi_line, bar_index + nbarsforward)
+        line.set_x2(lo_line, bar_index + nbarsforward)
+        line.set_x2(onhi_line, bar_index + nbarsforward)
+        line.set_x2(onlo_line, bar_index + nbarsforward)
+        line.set_x2(rthcl_line, bar_index + yest_offset)
+        line.set_x2(rthop_line, bar_index + yest_offset)
+        line.set_x2(rthhi_line, bar_index + yest_offset)
+        line.set_x2(rthlo_line, bar_index + yest_offset)
+
+        //move all labels horizontally
+        label.set_x(label_op, bar_index + nbarsforward)
+        label.set_x(label_hi, bar_index + nbarsforward)
+        label.set_x(label_lo, bar_index + nbarsforward)
+        label.set_x(label_on_hi, bar_index + nbarsforward)
+        label.set_x(label_on_lo, bar_index + nbarsforward)
+        label.set_x(label_rth_cl, bar_index + yest_offset)
+        label.set_x(label_rth_op, bar_index + yest_offset)
+        label.set_x(label_rth_hi, bar_index + yest_offset)
+        label.set_x(label_rth_lo, bar_index + yest_offset)
+
+        //move start of all lines if session changes
+        if index_rth_start != index_rth_start[1]
+            line.set_x1(op_line, index_rth_start)
+            line.set_x1(hi_line, index_rth_start)
+            line.set_x1(lo_line, index_rth_start)
+        
+        if index_on_start != index_on_start[1]
+            line.set_x1(onhi_line, index_on_start)
+            line.set_x1(onlo_line, index_on_start)
+            line.set_x1(rthcl_line, index_on_start)
+            line.set_x1(rthop_line, index_on_start)
+            line.set_x1(rthhi_line, index_on_start)
+            line.set_x1(rthlo_line, index_on_start)
+
+
+//@version=5
+
+
+
+//Daily high and low
+dailyhigh = request.security(syminfo.tickerid, 'D', high)
+dailylow = request.security(syminfo.tickerid, 'D', low)
+
+//Yesterday high and low
+previousdayhigh = request.security(syminfo.tickerid, 'D', high[1])
+previousdaylow = request.security(syminfo.tickerid, 'D', low[1])
+PreMarketHours = input.session('1600-0930:1234567', 'USA Pre-Market Hours')
+//Premarket high and low
+t = time('1440', '0400-0930:23456')  // 1440 is the number of minutes in a whole day.
+is_first = na(t[1]) and not na(t) or t[1] < t
+ending_hour = 9
+ending_minute = 30
+
+pm_high = float(na)
+pm_low = float(na)
+k = int(na)
+
+if is_first and barstate.isnew and (hour < ending_hour or hour >= 16 or hour == ending_hour and minute < ending_minute)
+    pm_high := high
+    pm_low := low
+    pm_low
+else
+    pm_high := pm_high[1]
+    pm_low := pm_low[1]
+    pm_low
+
+if high > pm_high and (hour < ending_hour or hour >= 1600 or hour == ending_hour and minute < ending_minute)
+    pm_high := high
+    pm_high
+
+if low < pm_low and (hour < ending_hour or hour >= 1600 or hour == ending_hour and minute < ending_minute)
+    pm_low := low
+    pm_low
+
+LastOnly = true
+
+if LastOnly == true
+    k := -9999
+    k
+else
+    k := 0
+    k
+
+    //Pre market high low
+ti = time('1440', '0400-0930:23456')  // 1440 is the number of minutes in a whole day.
+is_first1 = na(ti[1]) and not na(ti) or ti[1] < ti
+ending_hour1 = 09
+ending_minute1 = 30
+
+ah_high = float(na)
+ah_low = float(na)
+g = int(na)
+
+if is_first1 and barstate.isnew and (hour < ending_hour1 or hour >= 20 or hour == ending_hour1 and minute < ending_minute1)
+    ah_high := high
+    ah_low := low
+    ah_low
+else
+    ah_high := ah_high[1]
+    ah_low := ah_low[1]
+    ah_low
+
+if high > ah_high and (hour < ending_hour1 or hour >= 2000 or hour == ending_hour1 and minute < ending_minute1)
+    ah_high := high
+    ah_high
+
+if low < ah_low and (hour < ending_hour1 or hour >= 2000 or hour == ending_hour1 and minute < ending_minute1)
+    ah_low := low
+    ah_low
+
+LastOnly1 = true
+
+if LastOnly1 == true
+    g := -9999
+    g
+else
+    g := 0
+    g
+
+
+// VAR
+TimeIsAllowed = not na(time(timeframe.period, PreMarketHours))
+NewSession = TimeIsAllowed and not TimeIsAllowed[1]
+
+var float refHigh = na
+refHigh := TimeIsAllowed and not TimeIsAllowed[1] ? high : TimeIsAllowed and TimeIsAllowed[1] ? high > refHigh ? high : refHigh : refHigh
+var float refLow = na
+refLow := TimeIsAllowed and not TimeIsAllowed[1] ? low : TimeIsAllowed and TimeIsAllowed[1] ? low < refLow ? low : refLow : refLow
+
+var int x = na
+x := NewSession ? time : x
+
+var int l01_x1_s1 = na
+var int l01_x2_s1 = na
+var float l01_y1_s1 = na
+var float l01_y2_s1 = na
+var int l02_x1_s1 = na
+var int l02_x2_s1 = na
+var float l02_y1_s1 = na
+var float l02_y2_s1 = na
+
+var l01 = line(na)
+var l01_s1 = line(na)
+var l02 = line(na)
+var l02_s1 = line(na)
+
+var int counter = 0
+var float sum = na
+
+
+// current session
+if TimeIsAllowed and not NewSession
+    counter += 1
+    sum += close
+    line.delete(l01)
+    line.delete(l02)
+   
+// set previous values
+if not TimeIsAllowed and TimeIsAllowed[1] and not NewSession
+    l01_x1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x1(l01), 0)
+    l01_x2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x2(l01), 0)
+    l01_y1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y1(l01), 0)
+    l01_y2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y2(l01), 0)
+    l02_x1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x1(l02), 0)
+    l02_x2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x2(l02), 0)
+    l02_y1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y1(l02), 0)
+    l02_y2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y2(l02), 0)
+    l02_y2_s1
+    
+//Just a variable here for the label coordinates
+td = time - time[5]
+
+//Daily high and low lines
+plot(dailyhigh, style=plot.style_line, title='Daily high', color=color.new(#1b5e20, 0), linewidth=1, trackprice=true, offset=k)
+dh = label.new(x=time + td, y=dailyhigh, text='HOD', xloc=xloc.bar_time, style=label.style_none, textcolor=#1b5e20, size=size.small, textalign=text.align_right)
+label.delete(dh[1])
+
+plot(dailylow, style=plot.style_line, title='Daily low', color=color.new(#b71c1c, 0), linewidth=1, trackprice=true, offset=k)
+dl = label.new(x=time + td, y=dailylow, text='LOD', xloc=xloc.bar_time, style=label.style_none, textcolor=#b71c1c, size=size.small, textalign=text.align_right)
+label.delete(dl[1])
+
+//Previous day high and low lines
+plot(previousdayhigh, style=plot.style_line, title='Yesterday\'s high', color=color.new(#a5d6a7, 0), linewidth=1, trackprice=true, offset=k)
+pdh = label.new(x=time + td, y=previousdayhigh, text='PH', xloc=xloc.bar_time, style=label.style_none, textcolor=#a5d6a7, size=size.small, textalign=text.align_right)
+label.delete(pdh[1])
+
+plot(previousdaylow, style=plot.style_line, title='Yesterday\'s low', color=color.new(#f8bbd0, 0), linewidth=1, trackprice=true, offset=k)
+pdl = label.new(x=time + td, y=previousdaylow, text='PL', xloc=xloc.bar_time, style=label.style_none, textcolor=#f8bbd0, size=size.small, textalign=text.align_right)
+label.delete(pdl[1])
+
+//Overnight High Low
+plot(refHigh, style=plot.style_line, title='ONH', trackprice=true, color=color.new(#4caf50, 0), linewidth=1, offset=k)
+pmh = label.new(x=time + td, y=refHigh, text='ONH', xloc=xloc.bar_time, style=label.style_none, textcolor=#4caf50, size=size.small, textalign=text.align_right)
+label.delete(pmh[1])
+
+plot(refLow, style=plot.style_line, title='ONL', trackprice=true, color=color.new(#f44336, 0), linewidth=1, offset=k)
+pml = label.new(x=time + td, y=refLow, text='ONL', xloc=xloc.bar_time, style=label.style_none, textcolor=#f44336, size=size.small, textalign=text.align_right)
+label.delete(pml[1])
+
+//Premarket high and low lines
+plot(ah_high, style=plot.style_line, title='Pre market High', trackprice=true, color=color.new(#679eca, 0), linewidth=1, offset=k)
+ahh = label.new(x=time + td, y=ah_high, text='______PMH', xloc=xloc.bar_time, style=label.style_none, textcolor=#679eca, size=size.small, textalign=text.align_right)
+label.delete(ahh[1])
+
+plot(ah_low, style=plot.style_line, title='Pre market Low', trackprice=true, color=color.new(#679eca, 0), linewidth=1, offset=k)
+ahl = label.new(x=time + td, y=ah_low, text='______PML', xloc=xloc.bar_time, style=label.style_none, textcolor=#679eca, size=size.small, textalign=text.align_right)
+label.delete(ahl[1])
+
+
+//@version=5
+//indicator('LevelZ', shorttitle='Levelz', overlay=true)
+
+NoLabel = input.bool(false, title='No Label Option ', tooltip='Option to have no Label Box')
+//Generic
+NoLabelOption = NoLabel ? label.style_none : label.style_label_left
+PriceLocation = NoLabel ? '                          ' : ''
+PriceLocation1 = NoLabel ? '                                 ' : ''
+LabelSize = NoLabel ? size.normal : size.small
+
+
+////////////////////////////////////////
+//Line Colors
+DanCCDailyInputColor = input.color(color.blue, title='Daily', group='User Selectable Line Colors', inline='Input 0')
+DanCCWeeklyInputColor = input.color(color.yellow, title='Weekly', group='User Selectable Line Colors', inline='Input 0')
+DanCCMonthlyInputColor = input.color(color.purple, title='Monthly', group='User Selectable Line Colors', inline='Input 0')
+
+
+//Daily Open
+DVWAPTxtLabelColor = NoLabel ? DanCCDailyInputColor : color.white
+WVWAPTxtLabelColor = NoLabel ? DanCCWeeklyInputColor : color.black
+MVWAPTxtLabelColor = NoLabel ? DanCCMonthlyInputColor : color.white
+A48VWAPTxtLabelColor = NoLabel ? color.navy : color.white
+A24VWAPTxtLabelColor = NoLabel ? color.blue : color.white
+
+
+/////////////////////////////////////////////////////////////////////
+/////////////////////////////////VWAPs
+show_WVWAPs = input.bool(false, title='Weekly', group='Standard VWAPS - Daily, Weekly, Monthly', inline='VWAP1')
+show_MVWAPs = input.bool(false, title='Monthly', group='Standard VWAPS - Daily, Weekly, Monthly', inline='VWAP1', tooltip='M-VWAP only shows on the 5 min and above timeframe / \'Live 24\' hour constantly updating VWAP')
+
+show_WVWAPs_color = show_WVWAPs ? DanCCWeeklyInputColor : na
+show_WVWAPs_text = show_WVWAPs ? WVWAPTxtLabelColor : na
+show_MVWAPs_color = show_MVWAPs ? DanCCMonthlyInputColor : na
+show_MVWAPs_text = show_MVWAPs ? MVWAPTxtLabelColor : na
+
+is_today = year == year(timenow) and month == month(timenow) and dayofmonth == dayofmonth(timenow)
+
+
+///VWAP rounding issue resolution 
+f_round_up_to_tick(x, mintick) =>
+    mult = 1 / mintick
+    value = math.ceil(x * mult) / mult
+    value
+
+f_round_down_to_tick(x, mintick) =>
+    mult = 1 / mintick
+    value = math.floor(x * mult) / mult
+    value
+/////////////////////////////////////////////////
+
+//Weeekly VWAP
+src = hlc3
+wt = time('W')
+
+wstart = na(wt[1]) or wt > wt[1]
+
+wsumSrc = src * volume
+wsumVol = volume
+wsumSrc := wstart ? wsumSrc : wsumSrc + wsumSrc[1]
+wsumVol := wstart ? wsumVol : wsumVol + wsumVol[1]
+
+WVWAP = wsumSrc / wsumVol
+wvw = f_round_up_to_tick(WVWAP, syminfo.mintick)
+
+plot(timeframe.isintraday ? wvw : na, title='W-VWAP', color=show_WVWAPs_color)
+var label wVWAPLabel = na
+wVWAPLabel := label.new(timenow, timeframe.isintraday ? wvw : na, xloc=xloc.bar_time, text=PriceLocation + 'W-VWAP -   ' + str.tostring(timeframe.isintraday ? wvw : na), color=show_WVWAPs_color, textcolor=show_WVWAPs_text, style=NoLabelOption, size=LabelSize)
+label.delete(wVWAPLabel[1])
+
+
+//Monthly VWAP
+
+
+var float vwapsum = na
+var float volumesum = na
+
+newSession = ta.change(time('M'))
+
+vwapsum := newSession ? hl2 * volume : hl2 * volume + vwapsum[1]
+volumesum := newSession ? volume : volume + volumesum[1]
+
+MVWAP = vwapsum / volumesum
+mvw = f_round_up_to_tick(MVWAP, syminfo.mintick)
+
+plot(newSession ? na : mvw, title='M-VWAP', color=show_MVWAPs_color, style=plot.style_linebr)
+var label mVWAPLabel = na
+mVWAPLabel := label.new(timenow, timeframe.isintraday ? mvw : na, xloc=xloc.bar_time, text=PriceLocation + 'M-VWAP -   ' + str.tostring(timeframe.isintraday ? mvw : na), color=show_MVWAPs_color, textcolor=show_MVWAPs_text, style=NoLabelOption, size=LabelSize)
+label.delete(mVWAPLabel[1])
+/////////////////////////////////////////////////////////////////////
+
+
+
+
+
+///////////////////////////////
+
+//Monthly Open
+mOpen = request.security(syminfo.tickerid, 'M', open, lookahead=barmerge.lookahead_on)
+pmOpen = request.security(syminfo.tickerid, 'M', open[1], lookahead=barmerge.lookahead_on)
+
+pmHigh = request.security(syminfo.tickerid, 'M', high[1], lookahead=barmerge.lookahead_on)
+pmLow = request.security(syminfo.tickerid, 'M', low[1], lookahead=barmerge.lookahead_on)
+
+
+//Weekly Open
+wOpen = request.security(syminfo.tickerid, 'W', open, lookahead=barmerge.lookahead_on)
+pwOpen = request.security(syminfo.tickerid, 'W', open[1], lookahead=barmerge.lookahead_on)
+
+
+//Previous Day Open High Low
+dOpen = request.security(syminfo.tickerid, 'D', open, lookahead=barmerge.lookahead_on)
+pdOpen = request.security(syminfo.tickerid, 'D', open[1], lookahead=barmerge.lookahead_on)
+dbyOpen = request.security(syminfo.tickerid, 'D', open[2], lookahead=barmerge.lookahead_on)
+
+pdHigh = request.security(syminfo.tickerid, 'D', high[1], lookahead=barmerge.lookahead_on)
+pdLow = request.security(syminfo.tickerid, 'D', low[1], lookahead=barmerge.lookahead_on)
+
+pwHigh = request.security(syminfo.tickerid, 'W', high[1], lookahead=barmerge.lookahead_on)
+pwLow = request.security(syminfo.tickerid, 'W', low[1], lookahead=barmerge.lookahead_on)
+
+
+//Current Day High Low
+var Yesterday = 0
+var DailyHigh = 0.0
+var DailyLow = 0.0
+
+Today = time('D')
+CheckDay = Today != Yesterday
+Yesterday := Today
+DailyHigh := CheckDay or high > DailyHigh ? high[0] : DailyHigh
+DailyLow := CheckDay or low < DailyLow ? low[0] : DailyLow
+
+
+
+/// Input to show Lines and Labels for right of price in reference to the above
+ExtendAxisLine = input.bool(false, title='Extend Axis value lines across chart', group='Daily, Weekly, Monthly, EQ Price Axis', tooltip='-d = Daily, w = Weekly, m = Monthly, p = Previous, dby = Day Before Yesterday')
+
+ExtendOption = ExtendAxisLine ? extend.both : extend.right
+
+PriceDaily = input.bool(true, title='- pdHigh - pdLow - pdEQ', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Daily 1')
+showdOpen = input.bool(false, title='- dOpen', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Daily')
+showdLow = input.bool(false, title='- LOD', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Daily')
+showdHigh = input.bool(false, title='- HOD', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Daily')
+showpdOpen = input.bool(false, title='- pdOpen', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Daily')
+showdbyOpen = input.bool(false, title='- dbyOpen', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Daily')
+
+PriceWeekly = input.bool(true, title='- pwEQ', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Weekly')
+showwOpen = input.bool(false, title='- wOpen', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Weekly')
+showpwOpen = input.bool(false, title='- pwOpen', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Weekly')
+showpwHigh = input.bool(false, title='- pwHigh', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Weekly')
+showpwLow = input.bool(false, title='- pwLow', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Weekly')
+
+showpmOpen = input.bool(false, title='- mOpen', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Monthly')
+showmOpen = input.bool(false, title='- prmOpen', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Monthly')
+showpmHigh = input.bool(false, title='- prmHigh', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Monthly')
+showpmLow = input.bool(false, title='- prmLow', group='Daily, Weekly, Monthly, EQ Price Axis', inline='Monthly')
+
+
+// Line Var
+var line pmHighLine = na
+var line pmLowLine = na
+var line mOpenLine = na
+var line pmOpenLine = na
+var line pwHighLine = na
+var line pwLowLine = na
+var line wOpenLine = na
+var line pwOpenLine = na
+var line pdOpenLine = na
+var line dOpenLine = na
+var line dbyOpenLine = na
+var line pdHighLine = na
+var line pdLowLine = na
+var line pdEQLine = na
+var line pwEQLine = na
+var line dLowLine = na
+var line dHighLine = na
+
+
+
+//Label Var
+var label pmHighLabel = na
+var label pmLowLabel = na
+var label mOpenLabel = na
+var label pmOpenLabel = na
+var label pwHighLabel = na
+var label pwLowLabel = na
+var label wOpenLabel = na
+var label pwOpenLabel = na
+var label dOpenLabel = na
+var label pdOpenLabel = na
+var label dbyOpenLabel = na
+var label pdHighLabel = na
+var label pdLowLabel = na
+var label pdEQLabel = na
+var label pwEQLabel = na
+var label dLowLabel = na
+var label dHighLabel = na
+
+
+//Create Line
+if PriceDaily
+
+    pdHighLine := line.new(bar_index[1], pdHigh, bar_index, pdHigh, color=DanCCDailyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+    pdLowLine := line.new(bar_index[1], pdLow, bar_index, pdLow, color=DanCCDailyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+   
+
+//Create Label
+    pdHighLabel := label.new(bar_index, pdHigh, text='  pdHigh - ' + str.tostring(pdHigh), color=DanCCDailyInputColor, textcolor=DanCCDailyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    pdLowLabel := label.new(bar_index, pdLow, text='  pdLow - ' + str.tostring(pdLow), color=DanCCDailyInputColor, textcolor=DanCCDailyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+
+//Delete Line
+    line.delete(pdHighLine[1])
+    line.delete(pdLowLine[1])
+    
+//Delete Label    
+    label.delete(pdHighLabel[1])
+    label.delete(pdLowLabel[1])
+
+
+/////////////////////Weekly
+
+//Create Line
+if showpwHigh
+    pwHighLine := line.new(bar_index[1], pwHigh, bar_index, pwHigh, color=DanCCWeeklyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+//Delete Line
+    line.delete(pwHighLine[1])
+//Create Label
+    pwHighLabel := label.new(bar_index, pwHigh, text='                                                                                                                                                           pwHigh - ' + str.tostring(pwHigh), color=DanCCWeeklyInputColor, textcolor=DanCCWeeklyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+//Delete Label    
+    label.delete(pwHighLabel[1])
+
+
+//Create Line
+if showpwLow
+    pwLowLine := line.new(bar_index[1], pwLow, bar_index, pwLow, color=DanCCWeeklyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+//Delete Line
+    line.delete(pwLowLine[1])
+//Create Label
+    pwLowLabel := label.new(bar_index, pwLow, text='                                                                                                                                                           pwLow - ' + str.tostring(pwLow), color=DanCCWeeklyInputColor, textcolor=DanCCWeeklyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+//Delete Label    
+    label.delete(pwLowLabel[1])
+
+
+
+
+////////////////////Monthly
+if showmOpen
+    mOpenLine := line.new(bar_index[1], mOpen, bar_index, mOpen, color=DanCCMonthlyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+//Create Label
+    mOpenLabel := label.new(bar_index, mOpen, text='                                                                                                                                                                                                                      mOpen - ' + str.tostring(mOpen), color=DanCCMonthlyInputColor, textcolor=DanCCMonthlyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+//Delete Line
+    line.delete(mOpenLine[1])
+//Delete Label    
+    label.delete(mOpenLabel[1])
+
+if showpmOpen
+    pmOpenLine := line.new(bar_index[1], pmOpen, bar_index, pmOpen, color=DanCCMonthlyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+//Create Label
+    pmOpenLabel := label.new(bar_index, pmOpen, text='                                                                                                                                                                                                                      pmOpen - ' + str.tostring(pmOpen), color=DanCCMonthlyInputColor, textcolor=DanCCMonthlyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+//Delete Line
+    line.delete(pmOpenLine[1])
+//Delete Label    
+    label.delete(pmOpenLabel[1])
+
+//Create Line
+if showpmHigh
+    pmHighLine := line.new(bar_index[1], pmHigh, bar_index, pmHigh, color=DanCCMonthlyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+//Delete Line
+    line.delete(pmHighLine[1])
+//Create Label
+    pmHighLabel := label.new(bar_index, pmHigh, text='                                                                                                                                                                                                                      pmHigh - ' + str.tostring(pmHigh), color=DanCCMonthlyInputColor, textcolor=DanCCMonthlyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+//Delete Label    
+    label.delete(pmHighLabel[1])
+
+
+
+//Create Line
+if showpmLow
+    pmLowLine := line.new(bar_index[1], pmLow, bar_index, pmLow, color=DanCCMonthlyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+//Delete Line
+    line.delete(pmLowLine[1])
+//Create Label
+    pmLowLabel := label.new(bar_index, pmLow, text='                                                                                                                                                                                                                      pmLow - ' + str.tostring(pmLow), color=DanCCMonthlyInputColor, textcolor=DanCCMonthlyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+//Delete Label    
+    label.delete(pmLowLabel[1])
+
+
+
+/////////Optional Levels
+
+if showdOpen
+    dOpenLine := line.new(bar_index[1], dOpen, bar_index, dOpen, color=DanCCDailyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+    dOpenLabel := label.new(bar_index, dOpen, text='                                                                                              dOpen - ' + str.tostring(dOpen), color=DanCCDailyInputColor, textcolor=DanCCDailyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    line.delete(dOpenLine[1])
+    label.delete(dOpenLabel[1])
+
+
+
+if showdbyOpen
+    dbyOpenLine := line.new(bar_index[1], dbyOpen, bar_index, dbyOpen, color=DanCCDailyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+    dbyOpenLabel := label.new(bar_index, dbyOpen, text='                                                                                              dbyOpen - ' + str.tostring(dbyOpen), color=DanCCDailyInputColor, textcolor=color.blue, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    line.delete(dbyOpenLine[1])
+    label.delete(dbyOpenLabel[1])
+
+if showpdOpen
+    pdOpenLine := line.new(bar_index[1], pdOpen, bar_index, pdOpen, color=DanCCDailyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+    pdOpenLabel := label.new(bar_index, pdOpen, text='                                                                                              pdOpen - ' + str.tostring(pdOpen), color=DanCCDailyInputColor, textcolor=DanCCDailyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    line.delete(pdOpenLine[1])
+    label.delete(pdOpenLabel[1])
+
+if showwOpen
+    wOpenLine := line.new(bar_index[1], wOpen, bar_index, wOpen, color=DanCCWeeklyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+    wOpenLabel := label.new(bar_index, wOpen, text='                                                                                                                                                           wOpen - ' + str.tostring(wOpen), color=DanCCWeeklyInputColor, textcolor=DanCCWeeklyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+    line.delete(wOpenLine[1])
+    label.delete(wOpenLabel[1])
+
+if showpwOpen
+    pwOpenLine := line.new(bar_index[1], pwOpen, bar_index, pwOpen, color=DanCCWeeklyInputColor, style=line.style_dashed, width=1, extend=ExtendOption)
+    pwOpenLabel := label.new(bar_index, pwOpen, text='                                                                                                                                                           pwOpen - ' + str.tostring(pwOpen), color=DanCCWeeklyInputColor, textcolor=DanCCWeeklyInputColor, style=label.style_none, size=size.normal, xloc=xloc.bar_index)
+    line.delete(pwOpenLine[1])
+    label.delete(pwOpenLabel[1])
+
+
+if showdLow
+    dLowLine := line.new(bar_index[1], DailyLow, bar_index, DailyLow, color=color.white, style=line.style_dashed, width=1, extend=ExtendOption)
+    dLowLabel := label.new(bar_index, DailyLow, text='                                                                                              LOD - ' + str.tostring(DailyLow), color=color.white, textcolor=color.white, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    line.delete(dLowLine[1])
+    label.delete(dLowLabel[1])
+
+if showdHigh
+    dHighLine := line.new(bar_index[1], DailyHigh, bar_index, DailyHigh, color=color.white, style=line.style_dashed, width=1, extend=ExtendOption)
+    dHighLabel := label.new(bar_index, DailyHigh, text='                                                                                              HOD - ' + str.tostring(DailyHigh), color=color.white, textcolor=color.white, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    line.delete(dHighLine[1])
+    label.delete(dHighLabel[1])
+
+
+
+
+//Daily
+
+show_DanCCInput1 = input.bool(false, title='', group='Manual Daily Inputs', inline='Input 1')
+DanCCInput1_color = show_DanCCInput1 ? DanCCDailyInputColor : na
+DanCCInput1 = input.int(59000, title='1', group='Manual Daily Inputs', inline='Input 1')
+plot(show_DanCCInput1 ? DanCCInput1 : na, 'Daily 1', ta.change(DanCCInput1) ? na : DanCCInput1_color, offset=0)
+if show_DanCCInput1
+    DanCC1 = label.new(bar_index[25], DanCCInput1, text='Daily 1 - ' + str.tostring(DanCCInput1), color=DanCCInput1_color, textcolor=DanCCInput1_color, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC1[1])
+
+show_DanCCInput2 = input.bool(false, title='', group='Manual Daily Inputs', inline='Input 1')
+DanCCInput2_color = show_DanCCInput2 ? DanCCDailyInputColor : na
+DanCCInput2 = input.int(59300, title='2', group='Manual Daily Inputs', inline='Input 1')
+plot(show_DanCCInput2 ? DanCCInput2 : na, 'Daily 2', ta.change(DanCCInput2) ? na : DanCCInput2_color, offset=0)
+if show_DanCCInput2
+    DanCC2 = label.new(bar_index[25], DanCCInput2, text='Daily 2 - ' + str.tostring(DanCCInput2), color=DanCCInput2_color, textcolor=DanCCInput2_color, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC2[1])
+
+
+
+show_DanCCInput3 = input.bool(false, title='', group='Manual Daily Inputs', inline='Input 1')
+DanCCInput3_color = show_DanCCInput3 ? DanCCDailyInputColor : na
+DanCCInput3 = input.int(59250, title='3', group='Manual Daily Inputs', inline='Input 1', tooltip='Levels can be configured to alerts')
+plot(show_DanCCInput3 ? DanCCInput3 : na, 'Daily 3', ta.change(DanCCInput3) ? na : DanCCInput3_color, offset=0)
+if show_DanCCInput3
+    DanCC3 = label.new(bar_index[25], DanCCInput3, text='Daily 3 - ' + str.tostring(DanCCInput3), color=DanCCInput3_color, textcolor=DanCCInput3_color, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC3[1])
+
+
+
+
+// //Weekly
+
+show_DanCCInput1W = input.bool(false, title='', group='Manual Weekly Inputs', inline='Input 2')
+DanCCInput1_colorW = show_DanCCInput1W ? DanCCWeeklyInputColor : na
+DanCCInput1W = input.int(58200, title='1', group='Manual Weekly Inputs', inline='Input 2')
+plot(show_DanCCInput1W ? DanCCInput1W : na, 'Weekly 1', ta.change(DanCCInput1W) ? na : DanCCInput1_colorW, offset=0)
+if show_DanCCInput1W
+    DanCC1W = label.new(bar_index[25], DanCCInput1W, text='Weekly 1 - ' + str.tostring(DanCCInput1W), color=DanCCInput1_colorW, textcolor=DanCCInput1_colorW, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC1W[1])
+
+
+
+
+show_DanCCInput2W = input.bool(false, title='', group='Manual Weekly Inputs', inline='Input 2')
+DanCCInput2_colorW = show_DanCCInput2W ? DanCCWeeklyInputColor : na
+DanCCInput2W = input.int(58300, title='2', group='Manual Weekly Inputs', inline='Input 2')
+plot(show_DanCCInput2W ? DanCCInput2W : na, 'Weekly 2', ta.change(DanCCInput2W) ? na : DanCCInput2_colorW, offset=0)
+if show_DanCCInput2W
+    DanCC2W = label.new(bar_index[25], DanCCInput2W, text='Weekly 2 - ' + str.tostring(DanCCInput2W), color=DanCCInput2_colorW, textcolor=DanCCInput2_colorW, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC2W[1])
+
+
+
+
+show_DanCCInput3W = input.bool(false, title='', group='Manual Weekly Inputs', inline='Input 2')
+DanCCInput3_colorW = show_DanCCInput3W ? DanCCWeeklyInputColor : na
+DanCCInput3W = input.int(60250, title='3', group='Manual Weekly Inputs', inline='Input 2', tooltip='Levels can be configured to alerts')
+plot(show_DanCCInput3W ? DanCCInput3W : na, 'Weekly 3', ta.change(DanCCInput3W) ? na : DanCCInput3_colorW, offset=0)
+if show_DanCCInput3W
+    DanCC3W = label.new(bar_index[25], DanCCInput3W, text='Weekly 3 - ' + str.tostring(DanCCInput3W), color=DanCCInput3_colorW, textcolor=DanCCInput3_colorW, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC3W[1])
+
+
+
+
+// /////Monthly
+show_DanCCInput1M = input.bool(false, title='', group='Manual Monthly Inputs', inline='Input 3')
+DanCCInput1_colorM = show_DanCCInput1M ? DanCCMonthlyInputColor : na
+DanCCInput1M = input.int(61200, title='1', group='Manual Monthly Inputs', inline='Input 3')
+plot(show_DanCCInput1M ? DanCCInput1M : na, 'Monthly 1', ta.change(DanCCInput1M) ? na : DanCCInput1_colorM, offset=0)
+if show_DanCCInput1M
+    DanCC1M = label.new(bar_index[25], DanCCInput1M, text='Monthly 1 - ' + str.tostring(DanCCInput1M), color=DanCCInput1_colorM, textcolor=DanCCInput1_colorM, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC1M[1])
+
+
+
+
+show_DanCCInput2M = input.bool(false, title='', group='Manual Monthly Inputs', inline='Input 3')
+DanCCInput2_colorM = show_DanCCInput2M ? DanCCMonthlyInputColor : na
+DanCCInput2M = input.int(59900, title='2', group='Manual Monthly Inputs', inline='Input 3')
+plot(show_DanCCInput2M ? DanCCInput2M : na, 'Monthly 2', ta.change(DanCCInput2M) ? na : DanCCInput2_colorM, offset=0)
+if show_DanCCInput2M
+    DanCC2M = label.new(bar_index[25], DanCCInput2M, text='Monthly 2 - ' + str.tostring(DanCCInput2M), color=DanCCInput2_colorM, textcolor=DanCCInput2_colorM, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC2M[1])
+
+
+show_DanCCInput3M = input.bool(false, title='', group='Manual Monthly Inputs', inline='Input 3')
+DanCCInput3_colorM = show_DanCCInput3M ? DanCCMonthlyInputColor : na
+DanCCInput3M = input.int(60350, title='3', group='Manual Monthly Inputs', inline='Input 3', tooltip='Levels can be configured to alerts')
+plot(show_DanCCInput3M ? DanCCInput3M : na, 'Monthly 3', ta.change(DanCCInput3M) ? na : DanCCInput3_colorM, offset=0)
+if show_DanCCInput3M
+    DanCC3M = label.new(bar_index[25], DanCCInput3M, text='Monthly 3 - ' + str.tostring(DanCCInput3M), color=DanCCInput3_colorM, textcolor=DanCCInput3_colorM, style=label.style_none, size=size.normal, xloc=xloc.bar_index, textalign=text.align_right)
+    label.delete(DanCC3M[1])
+
+
+////////////////////////////////////////Input Daniel Targets - Finish
+
+
+
+
+
+
+//Session Rules
+bartimeSess = time('D')
+newbarSess = bartimeSess != bartimeSess[1]
+
+show_nPOCs = input.bool(true, title='Show Naked POCs', group='Naked Point of Control Settings')
+dtf = input.timeframe('D', title='nPOC - Time Frame', group='Naked Point of Control Settings')
+resolution = input.float(1, title='Resolution (Change resolution to Symbol decimal)', group='Symbol Settings', tooltip='E.g. BTCUSD = 1, XRPUSD = 0.00001, QTUMUSD = 0.001 ')
+
+show_nPOCs_color = show_nPOCs ? #FFC0CB : na
+
+is_new_bar(t) =>
+    ta.change(time(t)) != 0
+round_to_nearest(v, x) =>
+    math.round(v / x) * x
+
+tick_size = math.max(syminfo.mintick, resolution)
+
+var a = array.new_float(0)
+
+a_min = 0.0
+a_min := nz(a_min[1], round_to_nearest(low, tick_size))
+a_max = 0.0
+a_max := nz(a_max[1], round_to_nearest(high, tick_size))
+
+d_switch = is_new_bar(dtf)
+
+if d_switch
+    a_min := low
+    a_max := high
+    array.clear(a)
+
+// Scaled min max
+v_min = int(round_to_nearest(low - a_min, tick_size) / tick_size)
+v_max = int(round_to_nearest(high - a_min, tick_size) / tick_size)
+
+// Scaled candle range
+ticks = v_max - v_min
+
+vol = volume / (ticks == 0 ? 1 : ticks)
+
+for i = v_min to math.max(v_max - 1, v_min) by 1
+    // Insert new low value
+    if i < 0
+        array.insert(a, i - v_min, vol)
+        continue
+
+    // Adjust index
+    offset = v_min < 0 ? math.abs(v_min) : 0
+    index = int(i + offset)
+
+    // Push new high value
+    if index >= array.size(a)
+        array.push(a, vol)
+        continue
+
+    // Update existing value
+    v = array.get(a, index)
+    array.set(a, index, v + vol)
+
+// Array bounds
+a_min := math.min(a_min, round_to_nearest(low, tick_size))
+a_max := math.max(a_max, round_to_nearest(high, tick_size))
+a_size = array.size(a)
+
+// POC
+
+poc_index = -1
+poc_prev = -1.0
+sum_vol = 0.0
+
+for i = 0 to a_size - 1 by 1
+    poc_current = array.get(a, i)
+    sum_vol += poc_current
+
+    if poc_current > poc_prev
+        poc_prev := poc_current
+        poc_index := i
+        poc_index
+
+
+float p_poc = 0.0
+float d_poc = 0.0
+float b_poc = 0.0
+
+d_poc := poc_index * tick_size + a_min
+p_poc := is_new_bar(dtf) ? d_poc[1] : p_poc[1]
+
+var line[] uplines = array.new_line()
+var float[] uppocs = array.new_float()
+
+if is_new_bar(dtf)
+    array.push(uplines, line.new(time, p_poc, time + 1, p_poc, xloc=xloc.bar_time, color=show_nPOCs_color, extend=extend.right))
+    array.push(uppocs, p_poc)
+
+if array.size(uppocs) > 0
+    for i = 0 to array.size(uppocs) - 1 by 1
+        myuppoc = array.get(uppocs, i)
+        if myuppoc > low
+            line.delete(array.get(uplines, i))
+
+var line[] downlines = array.new_line()
+var float[] downpocs = array.new_float()
+
+if is_new_bar(dtf)
+    array.push(downlines, line.new(time, p_poc, time + 1, p_poc, xloc=xloc.bar_time, color=show_nPOCs_color, extend=extend.right))
+    array.push(downpocs, p_poc)
+
+if array.size(downpocs) > 0
+    for i = 0 to array.size(downpocs) - 1 by 1
+        mydownpoc = array.get(downpocs, i)
+        if mydownpoc < high
+            line.delete(array.get(downlines, i))
+
+
+
+
+

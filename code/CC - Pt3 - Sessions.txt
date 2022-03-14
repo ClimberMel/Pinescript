@@ -1,0 +1,128 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=4
+study("Chart Champions - Part 3 - Sessions", shorttitle="CC - Pt3 - Sessions", overlay=true)
+
+
+////////////////////////////////////////Input IGOR Sessions - Start
+
+///Asia End of Session Start
+AsiaInput = input('0000-0600', title="Asia", group = "IGOR Sessions - Bottom Color Banner", inline="1") 
+AsiaSession = time("1", AsiaInput+":1234567")
+plotshape(AsiaSession, title="IGOR Asia", style=shape.square, location=location.bottom, color=color.purple, transp=0, size=size.tiny)
+///Asia End of Session Finish
+
+
+///London End of Session Start
+LonInput = input('0600-1200', title="London", group = "IGOR Sessions - Bottom Color Banner", inline="1") 
+LonSession = time("1", LonInput+":1234567")
+plotshape(LonSession, title="IGOR London", style=shape.square, location=location.bottom, color=color.yellow, transp=0, size=size.tiny)
+
+
+///London End of Session Finish
+
+///New York End of Session Start
+NYInput = input('1200-2000', title="New York", group = "IGOR Sessions - Bottom Color Banner", inline="2") 
+NYSession = time("1", NYInput+":1234567")
+plotshape(NYSession, title="IGOR New York", style=shape.square, location=location.bottom, color=color.blue, transp=0, size=size.tiny)
+///New York End of Session Finish
+
+
+
+///Close
+CloseInput = input('2000-0000', title="Close", group = "IGOR Sessions - Bottom Color Banner", inline="2") 
+CloseSession = time("1", CloseInput+":1234567")
+plotshape(CloseSession, title="IGOR Close", style=shape.square, location=location.bottom, color=color.red, transp=0, size=size.tiny)
+
+////////////////////////////////////////Input IGOR Sessions - Finish
+
+
+
+////////////////Pre Market and Market Open Information
+showDOW = input(true, title="Show Chart Text and Top Banner Color", group = "Pre + Market Openings - Top Color Banner", tooltip="P = PreMarket, LSE = London Stock Exchange, NYSE = New York Stock Exchange. ASX = Australian Stock Exchange")
+
+inputMaxInterval = input(30, title="Hides sessions above specified time")
+loadIndicator = timeframe.isminutes and timeframe.multiplier <= inputMaxInterval
+
+
+
+PreASXExact1 = input("2200-2201", title="Pre ASX Exact", group = "ASX - Pre and Open Markets", inline="1") 
+PreASXExact = time(timeframe.period, PreASXExact1+":1234567") //Exact PreMarket New York
+PreASX1 = input("2200-0000", title="Pre ASX Period", group = "ASX - Pre and Open Markets", inline="1") 
+PreASX = time(timeframe.period, PreASX1+":1234567") //Market Open New York Period - configured to not overlap other markets
+ASXExactOpen1 = input("0000-0001", title="ASX Exact Open", group = "ASX - Pre and Open Markets", inline="2") 
+ASXExactOpen = time(timeframe.period, ASXExactOpen1+":1234567") //Exact Open ASX
+//ASXOpen = time(timeframe.period, "1430-2100:1234567") //Market Open ASX Period - configured to not overlap other markets ////Blanked due to overlapping
+ASXExactClose1 = input("0600-0601", title="ASX Exact Close", group = "ASX - Pre and Open Markets", inline="2")
+ASXExactClose = time(timeframe.period, ASXExactClose1+":1234567") //Exact Close ASX
+
+
+
+AsiaExactOpen1 = input("0000-0001", title="Asia Exact Open", group = "Asia Open Market", inline="1") 
+AsiaExactOpen = time(timeframe.period, AsiaExactOpen1+":1234567") //Exact Open Asia
+MorningAsia1 = input("0000-0230", title="Asia Morning Open Period", group = "Asia Open Market", inline="1") 
+MorningAsia = time(timeframe.period, MorningAsia1+":1234567") //Exact Morning Open Asia
+AfternoonAsia1 = input("0330-0400", title="Asia Afternoon Open Period", group = "Asia Open Market", inline="2") 
+AfternoonAsia = time(timeframe.period, AfternoonAsia1+":1234567") //Exact Afternoon Open Asia
+AsiaExactClose1 = input("0600-0601", title="Asia Exat Close", group = "Asia Open Market", inline="2") 
+AsiaExactClose = time(timeframe.period, AsiaExactClose1+":1234567") //Exact Close Asia
+
+
+
+PreLondonExact1 = input("0400-0401", title="Pre LSE Exact", group = "London - Pre and Open Markets", inline="1") 
+PreLondonExact = time(timeframe.period, PreLondonExact1+":1234567") //Exact PreMarket London
+PreLondon1 = input("0400-0650", title="Pre LSE Period", group = "London - Pre and Open Markets", inline="1") 
+PreLondon = time(timeframe.period, PreLondon1+":1234567") //Pre Market London Period
+LondonExactOpen1 = input("0700-0701", title="LSE Open Exact", group = "London - Pre and Open Markets", inline="2") 
+LondonExactOpen = time(timeframe.period, LondonExactOpen1+":1234567") //Exact Open London
+LondonOpen1 = input("0700-1030", title="LSE Open Period", group = "London - Pre and Open Markets", inline="2")
+LondonOpen = time(timeframe.period, LondonOpen1+":1234567") //Market Open London Period - configured to not overlap other markets
+LondonExactClose1 = input("1530-1531", title="LSE Exact Close", group = "London - Pre and Open Markets")
+LondonExactClose = time(timeframe.period, LondonExactClose1+":1234567") //Exact Close London
+//LondonClose1 = input("1530-1700", title="LSE Close", group = "London - Pre and Open Markets")
+//LondonClose = time(timeframe.period, LondonClose1+":1234567") //
+
+
+PreNYExact1 = input("1030-1031", title="Pre NY Exact", group = "New York - Pre and Open Markets", inline="1") 
+PreNYExact = time(timeframe.period, PreNYExact1+":1234567") //Exact PreMarket New York
+PreNY1 = input("1030-1330", title="Pre NY Period", group = "New York - Pre and Open Markets", inline="1") 
+PreNY = time(timeframe.period, PreNY1+":1234567") //PreMarket New York
+
+NYExactOpen1 = input("1330-1331", title="NY Exact Open", group = "New York - Pre and Open Markets", inline="2") 
+NYExactOpen = time(timeframe.period, NYExactOpen1+":1234567") //Exact Open New York
+
+NYOpen1 = input("1330-2000", title="NY Open Period", group = "New York - Pre and Open Markets", inline="2") 
+NYOpen = time(timeframe.period, NYOpen1+":1234567") //Market Open New York Period - configured to not overlap other markets
+
+NYExactClose1 = input("2000-2001", title="NY Exact Close", group = "New York - Pre and Open Markets", inline="3") 
+NYExactClose = time(timeframe.period, NYExactClose1+":1234567") //Exact Close New York
+
+
+
+
+
+
+
+plotshape(loadIndicator and showDOW and not na(PreNY), title="Pre NYSE", style=shape.square, location=location.top, color=#283A90, transp=0, size=size.tiny)
+plotshape(loadIndicator and showDOW and not na(NYOpen), title="NYSE Open", style=shape.square, location=location.top, color=#00008B, transp=0, size=size.tiny)
+
+plotshape(loadIndicator and showDOW and not na(PreLondon), title="Pre LSE", style=shape.square, location=location.top, color=#CCCC00, transp=0, size=size.tiny)
+plotshape(loadIndicator and showDOW and not na(LondonOpen), title="LSE Open", style=shape.square, location=location.top, color=#FFCC11, transp=0, size=size.tiny)
+
+
+plotshape(loadIndicator and showDOW and not na(MorningAsia), title="Morning Asia", style=shape.square, location=location.top, color=#AA00FF, transp=0, size=size.tiny)
+plotshape(loadIndicator and showDOW and not na(AfternoonAsia), title="Afternoon Asia", style=shape.square, location=location.top, color=#AA00FF, transp=0, size=size.tiny)
+
+
+plotshape(loadIndicator and showDOW and not na(PreASX), title="ASX Open", style=shape.square, location=location.top, color=color.gray, transp=0, size=size.tiny)
+
+plotshape(loadIndicator and showDOW and not na(NYExactOpen), title="NYSE Exact Opening", style=shape.square, location=location.top, color=color.green, transp=0, size=size.tiny, text="NYSE Open", textcolor=color.blue)
+plotshape(loadIndicator and showDOW and not na(NYExactClose), title="NYSE Exact Closing", style=shape.square, location=location.top, color=color.red, transp=0, size=size.tiny, text="NYSE Close", textcolor=color.blue)
+plotshape(loadIndicator and showDOW and not na(LondonExactOpen), title="LSE Exact Opening", style=shape.square, location=location.top, color=color.green, transp=0, size=size.tiny, text="LSE Open", textcolor=#FFCC11 )
+plotshape(loadIndicator and showDOW and not na(LondonExactClose), title="LSE Exact Closing", style=shape.square, location=location.top, color=color.red, transp=0, size=size.tiny, text="LSE Close", textcolor=#FFCC11 )
+plotshape(loadIndicator and showDOW and not na(AsiaExactOpen), title="Asia Exact Opening", style=shape.square, location=location.top, color=color.green, transp=0, size=size.tiny, text="Asia Open", textcolor=#AA00FF )
+plotshape(loadIndicator and showDOW and not na(AsiaExactClose), title="Asia Exact Closing", style=shape.square, location=location.top, color=color.red, transp=0, size=size.tiny, text="Asia Close", textcolor=#AA00FF )
+plotshape(loadIndicator and showDOW and not na(ASXExactOpen), title="ASX Exact Opening", style=shape.square, location=location.top, color=color.green, transp=0, size=size.tiny, text="   .    \n ASX Open", textcolor=color.gray )
+plotshape(loadIndicator and showDOW and not na(ASXExactClose), title="Asia Exact Closing", style=shape.square, location=location.top, color=color.red, transp=0, size=size.tiny, text="   .    \n ASX Close", textcolor=color.gray )
+plotshape(loadIndicator and showDOW and not na(PreNYExact), title="Pre NYSE Exact Opening", style=shape.square, location=location.top, color=color.green, transp=0, size=size.tiny, text="P-NYSE", textcolor=color.blue)
+plotshape(loadIndicator and showDOW and not na(PreASXExact), title="Sydney Exact Opening", style=shape.square, location=location.top, color=color.green, transp=0, size=size.tiny, text="Pre ASX", textcolor=color.gray)
+plotshape(loadIndicator and showDOW and not na(PreLondonExact), title="Pre LSE Exact Opening", style=shape.square, location=location.top, color=color.green, transp=0, size=size.tiny, text="P-LSE", textcolor=#FFCC11)

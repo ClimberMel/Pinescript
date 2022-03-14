@@ -1,0 +1,257 @@
+
+//@version=4
+study(title="POC VA Levelz", shorttitle="VA levelz", overlay=true)
+
+NoLabel = input(false, title="No Label Option ", tooltip="Option to have no Label Box")
+//Generic
+NoLabelOption = NoLabel ? label.style_none : label.style_label_left
+PriceLocation = NoLabel ?  "                          " : ""
+LabelSize = NoLabel ?  size.normal : size.small
+
+//Daily Open
+DLabelColor = NoLabel ? color.blue : color.white
+IBLabelColor = NoLabel ? color.orange : color.white
+POCLabelColor = NoLabel ? color.red : color.white
+dPOCLabelColor = NoLabel ? color.red : color.white
+
+//USer configurations 
+va_percent = input(0.70, title = "Value Area (70)",  group = "CCV Settings", type = input.float, 
+     minval = 0.1, maxval = 1, step = 0.1)
+     
+dtf = input("D", title = "Volume Capture Time Frame Period", type = input.resolution,  group = "Resolution Settings")
+vauto = input(true, title="Auto uses mintick data", group = "Resolution Settings", tooltip="If errors untick auto and tick manual")
+vresolution = input(false, title="Manual Resolution", group = "Resolution Settings")
+
+resolution = input(1, title = "Resolution (Change to decimal of pair for example 0.00001 for XRP)", group = "Resolution Settings", type = input.float)
+auto = syminfo.mintick
+auto := vauto ? auto : vresolution ? resolution : auto
+
+
+show_ccv = input(true, title = "First check if CCV is in play", group = "CCV Settings", type = input.bool)
+show_ccv_fill  = input(true, title = "CCV Background Fill",  group = "CCV Settings", type = input.bool)
+show_IB = input(false, title = "Show Initial Balance", type = input.bool)
+show_DevPOC  = input(false, title = "Show Developing Day POCs (dPOC)", group = "Optional Points of Contact", type = input.bool)
+show_PrevPOC  = input(false, title = "Show Previous Day POCs (pdPOC)", group = "Optional Points of Contact", type = input.bool)
+show_dbyPOC  = input(false, title = "Show Day Before Yesterday POCs (dbyPOC)", group = "Optional Points of Contact", type = input.bool)
+
+
+//CCV color/txt hide
+ccvtxt_color = show_ccv ? color.white : na
+ccvdopen_color = show_ccv ? color.blue : na
+IBtxt_color = show_IB ? IBLabelColor : na
+IB_color = show_IB ? color.orange : na
+pdPOC_txt_color = show_PrevPOC ? POCLabelColor : na
+dbyPOC_txt_color = show_dbyPOC ? POCLabelColor : na
+devPOC_txt_color = show_DevPOC ? POCLabelColor : na
+
+pdPOC_color = show_PrevPOC ? #B22222 : na
+dbyPOC_color = show_dbyPOC ? #8B0000 : na
+devPOC_color = show_DevPOC ? color.red : na
+
+
+
+
+//Session Rules
+bartimeSess = time('D')
+newbarSess = bartimeSess != bartimeSess[1]
+//offset_val = input(title="Label Offset", type=input.integer, defval=6)
+high_range = valuewhen(newbarSess,high,0)
+low_range = valuewhen(newbarSess,low,0)
+
+//Daily Open
+dOpen = security(syminfo.tickerid, "D", open, lookahead = barmerge.lookahead_on)
+plot(dOpen, " dOpen", change(dOpen) ? na : color.blue, offset = 0)
+dOpenLabel = label.new(timenow, dOpen, xloc = xloc.bar_time, text = PriceLocation+"dOpen - "+tostring(dOpen), color = color.blue, textcolor = DLabelColor, style = NoLabelOption, size=LabelSize)
+label.delete(dOpenLabel[1])
+
+
+
+//Calcul For OpendOpening Range
+locHigh = security(syminfo.tickerid, "60", high_range)
+locLow = security(syminfo.tickerid, "60", low_range)
+range = locHigh - locLow
+
+plot(locHigh, "IB High", change(locHigh) ? na : IB_color, offset = 0)
+locHighLabel = label.new(timenow, locHigh, xloc = xloc.bar_time, text = PriceLocation+"IB High - "+tostring(locHigh), color = IB_color, textcolor = IBtxt_color, style = NoLabelOption, size=LabelSize)
+label.delete(locHighLabel[1])
+
+plot(locLow, "IB Low", change(locLow) ? na : IB_color, offset = 0)
+locLowLabel = label.new(timenow, locLow, xloc = xloc.bar_time, text = PriceLocation+"IB Low - "+tostring(locLow), color = IB_color, textcolor = IBtxt_color, style = NoLabelOption, size=LabelSize)
+label.delete(locLowLabel[1])
+
+
+is_new_bar(t) => 
+    change(time(t)) != 0
+
+round_to_nearest(v, x) => 
+    round(v / x) * x
+
+
+tick_size = max(syminfo.mintick, auto)
+
+var a = array.new_float(0)
+
+a_min = 0.0, a_min := nz(a_min[1], round_to_nearest(low, tick_size))
+a_max = 0.0, a_max := nz(a_max[1], round_to_nearest(high, tick_size))
+
+d_switch = is_new_bar(dtf)
+
+if d_switch
+    a_min := low
+    a_max := high
+    array.clear(a)
+
+// Scaled min max
+v_min = int(round_to_nearest(low - a_min, tick_size) / tick_size)
+v_max = int(round_to_nearest(high - a_min, tick_size) / tick_size)
+
+// Scaled candle range
+ticks = v_max - v_min
+
+vol = volume / (ticks == 0 ? 1 : ticks)
+
+for i = v_min to max(v_max - 1, v_min)
+    
+    // Insert new low value
+    if i < 0
+        array.insert(a, i - v_min, vol)
+        continue
+    
+    // Adjust index
+    offset = v_min < 0 ? abs(v_min) : 0
+    index = int(i + offset)
+    
+    // Push new high value
+    if index >= array.size(a)
+        array.push(a, vol)
+        continue
+    
+    // Update existing value
+    v = array.get(a, index)
+    array.set(a, index, v + vol)
+
+// Array bounds
+a_min := min(a_min, round_to_nearest(low, tick_size))
+a_max := max(a_max, round_to_nearest(high, tick_size))
+a_size = array.size(a)
+
+// { POC
+
+poc_index = -1
+poc_prev = -1.0
+sum_vol = 0.0
+
+for i = 0 to a_size - 1
+    
+    poc_current = array.get(a, i)
+    sum_vol := sum_vol + poc_current
+    
+    if poc_current > poc_prev
+        poc_prev := poc_current
+        poc_index := i
+
+// }
+
+// { VA
+
+va_high_index = poc_index
+va_low_index  = poc_index
+    
+va_vol_cap = sum_vol * va_percent
+sum_va_vol = array.get(a, poc_index)
+
+for i = 1 to a_size - 1
+    
+    above = 0.0
+    if va_high_index + 1 < a_size - 1
+        above := above + nz(array.get(a, (va_high_index + 1)), 0.0)
+    if va_high_index + 2 < a_size - 1
+        above := above + nz(array.get(a, (va_high_index + 2)), 0.0)
+        
+    below = 0.0
+    if va_low_index - 1 > 0
+        below := below + nz(array.get(a, (va_low_index - 1)), 0.0)
+    if va_low_index - 2 > 0
+        below := below + nz(array.get(a, (va_low_index - 2)), 0.0)
+    
+    if above > below
+        va_high_index := min(va_high_index + 2, a_size - 1)
+        sum_va_vol  := sum_va_vol + above
+    else
+        va_low_index := max(va_low_index - 2, 0)
+        sum_va_vol := sum_va_vol + below
+        
+    if sum_va_vol >= va_vol_cap or (va_low_index <= 0 and va_high_index >= a_size - 1)
+        break
+
+// }
+
+float p_poc = 0.0
+float p_va_h = 0.0
+float p_va_l = 0.0
+
+float d_poc = 0.0
+float b_poc = 0.0
+
+float d_va_h = 0.0
+float d_va_l = 0.0
+
+d_poc  := poc_index * tick_size + a_min
+d_va_h := va_high_index * tick_size + a_min
+d_va_l := va_low_index  * tick_size + a_min
+
+
+
+if is_new_bar(dtf)
+    p_poc  := d_poc[1]
+    p_va_h := d_va_h[1]
+    p_va_l := d_va_l[1]
+    b_poc  := p_poc[1]
+else
+    p_poc  := p_poc[1]
+    p_va_h := p_va_h[1]
+    p_va_l := p_va_l[1]
+    b_poc  := b_poc[1]
+
+
+plot(d_poc, color = devPOC_color, title = "dPOC")
+d_poclabel = label.new(timenow, d_poc, xloc = xloc.bar_time, text = PriceLocation+"dPOC - "+tostring(d_poc), color = devPOC_color, textcolor = devPOC_txt_color, style = NoLabelOption, size=LabelSize)
+label.delete(d_poclabel[1])
+
+
+
+plot(b_poc, "dby_POC", change(b_poc) ? na : dbyPOC_color, offset = 0)
+b_poclabel = label.new(timenow, b_poc, xloc = xloc.bar_time, text = PriceLocation+"dby_POC - "+tostring(b_poc), color = dbyPOC_color, textcolor = dbyPOC_txt_color, style = NoLabelOption, size=LabelSize)
+label.delete(b_poclabel[1])
+
+
+
+
+ccv_color =  show_ccv ?
+     dOpen > p_va_h ? color.green : 
+     dOpen < p_va_l ? color.green :
+     color.red :
+     na
+ccv_fill_color = ccv_color
+
+ccv_fill_test = show_ccv_fill ? ccv_fill_color : na
+
+CCVTxtLabelColor = NoLabel ? ccv_color : color.white
+
+
+plot(p_poc, " pd_POC", change(p_poc) ? na : pdPOC_color, offset = 0)
+p_poclabel = label.new(timenow, p_poc, xloc = xloc.bar_time, text = PriceLocation+"pdPOC - "+tostring(p_poc), color = pdPOC_color, textcolor = pdPOC_txt_color, style = NoLabelOption, size=LabelSize)
+label.delete(p_poclabel[1])
+
+
+
+ccvplot_p_va_h = plot(p_va_h, " pdVAH", change(p_va_h) ? na : ccv_color, offset = 0)
+ccvplot_p_va_hlabel = label.new(timenow, p_va_h, xloc = xloc.bar_time, text = PriceLocation+"pdVAH - "+tostring(p_va_h), color = ccv_color, textcolor = CCVTxtLabelColor, style = NoLabelOption, size=LabelSize)
+label.delete(ccvplot_p_va_hlabel[1])
+
+ccvplot_p_va_l = plot(p_va_l, " pdVAL", change(p_va_l) ? na : ccv_color, offset = 0)
+ccvplot_p_va_llabel = label.new(timenow, p_va_l, xloc = xloc.bar_time, text = PriceLocation+"pdVAL - "+tostring(p_va_l), color = ccv_color, textcolor = CCVTxtLabelColor, style = NoLabelOption, size=LabelSize)
+label.delete(ccvplot_p_va_llabel[1])
+
+fill(ccvplot_p_va_h, ccvplot_p_va_l, ccv_fill_test)
+
