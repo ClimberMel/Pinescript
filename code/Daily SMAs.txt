@@ -1,0 +1,35 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ClimberMel
+
+// Shows the Daily Moving Averages on the Intraday Chart
+// Daily MA time periods can be adjusted in the settings.
+
+// Based on various scripts, so hats off to all those that have created DMAs before.
+
+//@version=5
+indicator('Daily Moving Averages on Intraday Chart', shorttitle='Daily MAs', overlay=true)
+
+// Take input for which daily SMAs to use
+longSMAInput = input.int(title='Long Term Daily SMA', minval=100, step=1, defval=200)
+mediumSMAInput = input.int(title='Medium Term Daily SMA', minval=50, step=1, defval=100)
+shortSMAInput = input.int(title='Short Term Daily SMA', minval=10, step=1, defval=50)
+xshortEMAshow = input.bool(true, "Show Daily EMA?", inline = "01")
+xshortEMAInput = input.int(title='Short Term Daily EMA', minval=1, step=1, defval=20)
+
+// Evaluate SMAs
+longSMA = ta.sma(close, longSMAInput)
+mediumSMA = ta.sma(close, mediumSMAInput)
+shortSMA = ta.sma(close, shortSMAInput)
+xshortEMA = ta.sma(close, xshortEMAInput)
+
+// Grab the Daily SMAs for the ticker
+plotLongSMA = request.security(syminfo.tickerid, 'D', longSMA)
+plotMediumSMA = request.security(syminfo.tickerid, 'D', mediumSMA)
+plotShortSMA = request.security(syminfo.tickerid, 'D', shortSMA)
+plotxShortEMA = request.security(syminfo.tickerid, 'D', xshortEMA)
+
+// Plot the SMAs
+plot(plotLongSMA, linewidth=4, color=color.new(color.olive, 40))
+plot(plotMediumSMA, linewidth=4, color=color.new(color.red, 40))
+plot(plotShortSMA, linewidth=4, color=color.new(color.purple, 40))
+plot(xshortEMAshow ? plotxShortEMA : na, linewidth=4, color=color.new(color.yellow, 40))
