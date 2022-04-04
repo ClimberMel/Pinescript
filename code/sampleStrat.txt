@@ -1,0 +1,204 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © tradestudio
+// Algomojo Trading Strategy Carry Forward Strategy/Intraday Strategy with Target/Stoploss
+// Supertrend Version 1.0
+// Code Date : 17th Dec 2021
+// Coded by Rajandran R (Founder - Marketcalls / Co-Founder - Algomojo)
+
+
+//@version=5
+strategy('SuperTrend Algomojo Trading Strategy with Target/Stoploss', shorttitle='Supertrend Algomojo', overlay=true)
+
+
+import algomojo/automation/9
+
+//Block 1 : API Controls + Algomojo Input Controls
+
+
+//Enter Your Algomojo API Key and API Secret Key
+
+am_client_id = input.string(title='Client ID', defval='ZZ0011', group='AlgoControls')
+am_api_key = input.string(title='API Key', defval='xxxxx', group='AlgoControls')
+am_api_secret = input.string(title='API Secret Key', defval='xxxxx', group='AlgoControls')
+am_broker = input.string(title='Broker', defval='ALICEBLUE', options=['ALICEBLUE', 'ANGELONE', 'FIRSTOCK', 'FYERS','MASTERTRUST','SAMCO','TRADEJINI','UPSTOX','ZEBU','ZERODHA'], group='AlgoControls')
+am_strategy = input.string(title='Strategy Name', defval='Supertrend Strategy', group='AlgoControls')
+am_symbol = input.string(title='Trading Symbol', defval='RELIANCE-EQ', group='AlgoControls')
+am_exchange = input.string(title='Exchange', defval='NSE', options=['NSE', 'NFO', 'MCX', 'BSE'], group='AlgoControls')
+am_quantity = input.int(title='Quantity', defval=1, group='AlgoControls')
+am_OrderType = input.string(title='Order Type', defval='MARKET', group='AlgoControls')
+am_Product = input.string(title='Product', defval='NORMAL', options=['NORMAL', 'INTRADAY', 'DELIVERY', 'MARGIN'], group='AlgoControls')
+am_Mode = input.string(title='Algo Mode', defval='ENABLE', options=['ENABLE', 'LONGONLY', 'SHORTONLY'], group='AlgoControls')
+
+
+////////////////////////////////////////Block 1 Module Ends////////////////////////////////////////////////////////////////////////
+
+
+
+//Block 2 : Autotrading API data configuration
+
+[BE,SX,BSR,SE,BX,SSR] = automation.algomodule(am_client_id, am_api_key,am_api_secret,am_broker,am_strategy,am_symbol,am_exchange,am_quantity,am_OrderType, am_Product)
+
+
+////////////////////////////////////////Block 2 Module Ends////////////////////////////////////////////////////////////////////////
+
+//Block 3 : Backtesting Controls & Live Automation Purpose
+
+FromMonth = input.int(defval=9, title='From Month', minval=1, maxval=12, group='Backtesting')
+FromDay = input.int(defval=1, title='From Day', minval=1, maxval=31, group='Backtesting')
+FromYear = input.int(defval=2018, title='From Year', minval=999, group='Backtesting')
+ToMonth = input.int(defval=1, title='To Month', minval=1, maxval=12, group='Backtesting')
+ToDay = input.int(defval=1, title='To Day', minval=1, maxval=31, group='Backtesting')
+ToYear = input.int(defval=9999, title='To Year', minval=999, group='Backtesting')
+start = timestamp(FromYear, FromMonth, FromDay, 00, 00)
+finish = timestamp(ToYear, ToMonth, ToDay, 23, 59)
+window() =>
+    time >= start and time <= finish ? true : false
+
+
+////////////////////////////////////////Block 3 Module Ends////////////////////////////////////////////////////////////////////////
+
+
+
+//inputs
+
+src = input(hl2, title='Source', group='Supertrend Controls')
+Multiplier = input.float(title='ATR Multiplier', step=0.1, defval=3.0, group='Supertrend Controls')
+Periods = input.int(title='ATR Period', defval=10, group='Supertrend Controls')
+changeATR = input.bool(title='Change ATR Calculation Method ?', defval=true, group='Supertrend Controls')
+showsignals = input.bool(title='Show Buy/Sell Signals ?', defval=true, group='Supertrend Controls')
+highlighting = input.bool(title='Highlighter On/Off ?', defval=true, group='Supertrend Controls')
+barcoloring = input.bool(title='Bar Coloring On/Off ?', defval=true, group='Supertrend Controls')
+
+intraday = input.bool(title='Intraday On/Off ?', defval=false, group='Intraday Controls')
+marketSession = input.session(title='Market session', defval='0915-1500', confirm=true, group='Intraday Controls')
+
+risk = input.bool(title='Stoploss/Target On/Off', defval=false, group='Stoploss/Target Controls')
+type = input.string(title='Type', defval='FIXED', options=['FIXED', 'PERCENTAGE', 'VOLATILITY'], group='Stoploss/Target Controls')
+stoploss = input.float(defval=10.0, title='Stoploss', group='Stoploss/Target Controls')
+target = input.float(defval=20.0, title='Target', group='Stoploss/Target Controls')
+TickSz = input.float(defval=0.05, title='TickSize', group='Stoploss/Target Controls')
+ATRMultiplier = input.float(title='ATR Multiplier', step=0.1, defval=1.5, group='Stoploss/Target Controls')
+ATRLength = input.int(title='ATR Period', defval=20, group='Stoploss/Target Controls')
+
+iATR = ta.atr(ATRLength)
+
+var longCondition = false
+var shortCondition = false
+
+
+atr2 = ta.sma(ta.tr, Periods)
+atr = changeATR ? ta.atr(Periods) : atr2
+up = src - Multiplier * atr
+up1 = nz(up[1], up)
+up := close[1] > up1 ? math.max(up, up1) : up
+dn = src + Multiplier * atr
+dn1 = nz(dn[1], dn)
+dn := close[1] < dn1 ? math.min(dn, dn1) : dn
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+
+
+//Plots
+upPlot = plot(trend == 1 ? up : na, title='Up Trend', style=plot.style_linebr, linewidth=2, color=color.new(color.green, 0))
+buySignal = trend == 1 and trend[1] == -1
+plotshape(buySignal  ? up : na, title='UpTrend Begins', location=location.absolute, style=shape.circle, size=size.tiny, color=color.new(color.green, 0))
+//plotshape(buySignal and showsignals ? up : na, title='Buy', text='Buy', location=location.absolute, style=shape.labelup, size=size.tiny, color=color.new(color.green, 0), textcolor=color.new(color.white, 0))
+dnPlot = plot(trend == 1 ? na : dn, title='Down Trend', style=plot.style_linebr, linewidth=2, color=color.new(color.red, 0))
+sellSignal = trend == -1 and trend[1] == 1
+plotshape(sellSignal ? dn : na, title='DownTrend Begins', location=location.absolute, style=shape.circle, size=size.tiny, color=color.new(color.red, 0))
+//plotshape(sellSignal and showsignals ? dn : na, title='Sell', text='Sell', location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.new(color.red, 0), textcolor=color.new(color.white, 0))
+mPlot = plot(ohlc4, title='', style=plot.style_circles, linewidth=0)
+
+longFillColor = highlighting ? trend == 1 ? color.new(color.green,90) : na : na
+shortFillColor = highlighting ? trend == -1 ? color.new(color.red,90) : na : na
+fill(mPlot, upPlot, title='UpTrend Highligter', color=longFillColor)
+fill(mPlot, dnPlot, title='DownTrend Highligter', color=shortFillColor)
+
+
+barInSession(sess) =>
+    time(timeframe.period, sess) != 0
+    
+bool intradaySession = barInSession(marketSession)
+
+buy = buySignal
+sell = sellSignal
+
+buy1 = buy[1]
+sell1 = sell[1]
+
+//assign signals
+if(not intraday)
+    longCondition := buySignal
+    shortCondition := sellSignal
+
+if(intraday)
+    longCondition := buySignal and intradaySession
+    shortCondition := sellSignal and intradaySession 
+
+//Block 4 : Execution Controls
+if(am_Mode=="ENABLE")
+    if longCondition and strategy.position_size == 0
+        strategy.entry('BUY', strategy.long, when=window(), alert_message=BE,comment='BUY')
+    if longCondition and strategy.position_size < 0
+        strategy.entry('BUY', strategy.long, when=window(), alert_message=BSR,comment='BUY')
+    if shortCondition and strategy.position_size == 0
+        strategy.entry('SELL', strategy.short, when=window(), alert_message=SE,comment='SELL')
+    if shortCondition and strategy.position_size > 0
+        strategy.entry('SELL', strategy.short, when=window(), alert_message=SSR,comment='SELL')
+        
+if(am_Mode=="LONGONLY")
+    if longCondition and strategy.position_size == 0
+        strategy.entry('BUY', strategy.long, when=window(), alert_message=BE,comment='BUY')
+    if shortCondition and strategy.position_size > 0
+        strategy.close('BUY', when=window(),  alert_message=BX,comment='BUY EXIT')    
+
+if(am_Mode=="SHORTONLY")
+    if shortCondition and strategy.position_size == 0
+        strategy.entry('SELL', strategy.short, when=window(), alert_message=SE,comment='SHORT')
+    if longCondition and strategy.position_size < 0
+        strategy.close('SELL', when=window(), alert_message=SX,comment='SHORT EXIT')
+
+if(intraday)
+    longsquareOff = not intradaySession and strategy.position_size > 0 
+    strategy.close(id='BUY', when=longsquareOff, comment='Square-off',alert_message=BX)
+    shortsquareOff = not intradaySession and strategy.position_size < 0 
+    strategy.close(id='SELL', when=shortsquareOff, comment='Square-off',alert_message=SX)
+
+////////////////////////////////////////Block 4 Module Ends////////////////////////////////////////////////////////////////////////
+
+buycount = ta.barssince(buySignal)
+sellcount = ta.barssince(sellSignal)
+color1 = buycount[1] < sellcount[1] ? color.green : buycount[1] > sellcount[1] ? color.red : na
+barcolor(barcoloring ? color1 : na)
+
+
+long_stop_level = ta.valuewhen(buy1, open - stoploss, 0)
+long_profit_level = ta.valuewhen(buy1, open + target, 0)
+short_stop_level = ta.valuewhen(sell1, open + stoploss, 0)
+short_profit_level = ta.valuewhen(sell1, open - target, 0)
+
+if(type=="PERCENTAGE")
+    long_stop_level := ta.valuewhen(buy1, open, 0) * (100-stoploss)/100
+    long_profit_level := ta.valuewhen(buy1, open, 0) * (100+target)/100
+    long_stop_level := TickSz * math.round(long_stop_level/TickSz)
+    long_profit_level := TickSz * math.round(long_profit_level/TickSz)
+    short_stop_level := ta.valuewhen(sell1, open, 0) * (100+stoploss)/100
+    short_profit_level := ta.valuewhen(sell1, open, 0) * (100-target)/100
+    short_stop_level := TickSz * math.round(short_stop_level/TickSz)
+    short_profit_level := TickSz * math.round(short_profit_level/TickSz)
+    
+if(type=="VOLATILITY")
+    long_stop_level := ta.valuewhen(buy1, open - iATR*ATRMultiplier, 0)
+    long_profit_level := ta.valuewhen(buy1, open + iATR*ATRMultiplier, 0)
+    short_stop_level := ta.valuewhen(sell1, open + iATR*ATRMultiplier, 0)
+    short_profit_level := ta.valuewhen(sell1, open - iATR*ATRMultiplier, 0)
+
+if(risk)
+    if(strategy.position_size!=0)
+        strategy.exit('TP/SL', 'BUY', stop=long_stop_level, limit=long_profit_level,alert_message=BX)
+        strategy.exit('TP/SL', 'SELL', stop=short_stop_level, limit=short_profit_level,alert_message=SX)
+plot(strategy.position_size <= 0 or not risk ? na : long_stop_level, color=color.new(color.red, 0), style=plot.style_circles, linewidth=2)
+plot(strategy.position_size <= 0 or not risk ? na : long_profit_level, color=color.new(color.green, 0), style=plot.style_circles, linewidth=2)
+plot(strategy.position_size >= 0 or not risk ? na : short_stop_level, color=color.new(color.red, 0), style=plot.style_circles, linewidth=2)
+plot(strategy.position_size >= 0 or not risk ? na : short_profit_level, color=color.new(color.green, 0), style=plot.style_circles, linewidth=2)

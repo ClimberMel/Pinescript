@@ -101,11 +101,6 @@ NYExactClose1 = input.string('2000-2001', title='NY Exact Close', group='New Yor
 NYExactClose = time(timeframe.period, NYExactClose1 + ':1234567')  //Exact Close New York
 
 
-
-
-
-
-
 plotshape(loadIndicator and showDOW and not na(PreNY), title='Pre NYSE', style=shape.square, location=location.top, color=color.new(#283A90, 0), size=size.tiny)
 plotshape(loadIndicator and showDOW and not na(NYOpen), title='NYSE Open', style=shape.square, location=location.top, color=color.new(#00008B, 0), size=size.tiny)
 

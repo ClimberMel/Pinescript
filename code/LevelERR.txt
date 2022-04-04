@@ -1,0 +1,444 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Code from Kg
+// 2022-02-23: Modified by ClimberMel
+
+//@version=5
+indicator('OHLC RTH & ON sessions', shorttitle='LevelERR', overlay=true)
+import czoa/SetSessionTimes/1 as Session
+
+//parameters
+session_type = input.string(defval='Day Session (RTH)', options=['Day Session (RTH)', 'Custom'],
+  title='Select Session Type (no need for stocks)', group='SESSION & INITIAL BALANCE',
+  tooltip = '-For futures, select RTH and the script will auto load the corresponding session times for your contract\n-Stocks will auto-set regardless of the selection here\n-Select Custom to override auto selection with the session times you select in the next parameter box.')
+custom_session_times_inp = input.session(defval="0830-1500", title = 'Custom Session', group='SESSION & INITIAL BALANCE')
+
+// Today's RTH Session settings inputs
+todop = input.bool(title='Open RTH Session', defval=true, inline='trthop', group='Today\'s RTH session')
+todopcol = input.color(title='', defval=color.new(color.purple, 20), inline='trthop', group='Today\'s RTH session')
+todopwidth = input.int(title='', defval=2, inline='trthop', group='Today\'s RTH session')
+
+// not sure what this next line was for but it added a int selector box in settings
+//todmidwidth = input.int(title='', defval=1, inline='trthmi', group='Today\'s RTH session')
+todhi = input.bool(title='High RTH Session', defval=true, inline='trthhi', group='Today\'s RTH session')
+todhicol = input.color(title='', defval=color.new(color.purple, 20), inline='trthhi', group='Today\'s RTH session')
+todhiwidth = input.int(title='', defval=1, inline='trthhi', group='Today\'s RTH session')
+todlo = input.bool(title='Low RTH Session', defval=true, inline='trthlo', group='Today\'s RTH session')
+todlocol = input.color(title='', defval=color.new(color.purple, 20), inline='trthlo', group='Today\'s RTH session')
+todlowidth = input.int(title='', defval=1, inline='trthlo', group='Today\'s RTH session')
+
+onhi = input.bool(title='High ON Session', defval=true, inline='onhi', group='Today\'s Overnight session')
+onhicol = input.color(title='', defval=color.new(color.gray, 20), inline='onhi', group='Today\'s Overnight session')
+onhiwidth = input.int(title='', defval=1, inline='onhi', group='Today\'s Overnight session')
+onlo = input.bool(title='Low ON Session', defval=true, inline='onlo', group='Today\'s Overnight session')
+onlocol = input.color(title='', defval=color.new(color.gray, 20), inline='onlo', group='Today\'s Overnight session')
+onlowidth = input.int(title='', defval=1, inline='onlo', group='Today\'s Overnight session')
+
+// Yesterday RTH Session settings inputs
+rthop = input.bool(title='Open RTH Session', defval=true, inline='yrthop', group='Yesterday\'s RTH session')
+rthopcol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthop', group='Yesterday\'s RTH session')
+rthopwidth = input.int(title='', defval=2, inline='yrthop', group='Yesterday\'s RTH session')
+rthcl = input.bool(title='Close RTH Session', defval=true, inline='yrthcl', group='Yesterday\'s RTH session')
+rthclcol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthcl', group='Yesterday\'s RTH session')
+rthclwidth = input.int(title='', defval=2, inline='yrthcl', group='Yesterday\'s RTH session')
+
+rthhi = input.bool(title='High RTH Session', defval=true, inline='yrthhi', group='Yesterday\'s RTH session')
+rthhicol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthhi', group='Yesterday\'s RTH session')
+rthhiwidth = input.int(title='', defval=1, inline='yrthhi', group='Yesterday\'s RTH session')
+rthlo = input.bool(title='Low RTH Session', defval=true, inline='yrthlo', group='Yesterday\'s RTH session')
+rthlocol = input.color(title='', defval=color.new(color.olive, 20), inline='yrthlo', group='Yesterday\'s RTH session')
+rthlowidth = input.int(title='', defval=1, inline='yrthlo', group='Yesterday\'s RTH session')
+
+bgON = input.bool(title='Different Background Outside of session times', defval=false, inline='ONcol', group='MORE SETTINGS')
+colON = input.color(title='', defval=color.new(color.gray, 93), inline='ONcol', group='MORE SETTINGS')
+display_value = input.bool(true, title='Show Price Values in Labels', group='MORE SETTINGS')
+nbarsforward = input.int(title='Offsset labels N bars to the right of last bar', defval=20, group='MORE SETTINGS')
+multforward = input.float(title="Multiply offset for yesterday's labels by", defval= 1, minval = 0.25, step = 0.25, group='MORE SETTINGS')
+label_size = input.string('small', options=['auto', 'tiny', 'small', 'normal', 'large', 'huge'], title='Label size', group='MORE SETTINGS')
+
+// Rounding levels to min tick
+nround(x) =>
+    n = math.round(x / syminfo.mintick) * syminfo.mintick
+    n
+l_size = label_size == 'auto' ? size.auto : label_size == 'tiny' ? size.tiny : label_size == 'small' ? size.small : label_size == 'normal' ? size.normal : label_size == 'large' ? size.large : size.huge
+
+//variables
+var float rth_op = na
+var float rth_cl = na
+var float rth_hi = na
+var float rth_lo = na
+var float rth_mid = na
+
+var float on_hi = na
+var float on_lo = na
+var float on_mid = na
+
+var float yest_rth_op = na
+var float yest_rth_cl = na
+var float yest_rth_mid = na
+var float yest_rth_hi = na
+var float yest_rth_lo = na
+
+var int index_on_start = na
+var int index_rth_start = na
+
+var yest_offset = math.round(multforward*nbarsforward)
+
+//try to automatically load session times for futures contracts
+[session_times, session_timezone] = Session.SetSessionTimes(session_type, custom_session_times_inp, syminfo.type, syminfo.root, syminfo.timezone)
+
+//CHECK WHETHER WE ARE IN SESSION
+session = na(time(timeframe.period, session_times)) ? false : true
+
+//optionally color background outside of RTH session
+color bgcol = na
+if not session and timeframe.isintraday and bgON
+    bgcol := colON
+
+bgcolor(bgcol)
+
+
+//CALCULATE IF THIS IS AN INTRADAY CHART AND START ONLY 3 DAYS AGO (no need to calculate all bars)
+if timeframe.isintraday and time > last_bar_time - 5*24*60*60*1000
+    //if we are insider RTH
+    if session
+        //calculate RTH values
+        rth_op := na(rth_op) ? open : rth_op
+        rth_hi := na(rth_hi) or high > rth_hi[1] ? high : rth_hi[1]
+        rth_lo := na(rth_lo) or low < rth_lo[1] ? low : rth_lo[1]
+        rth_cl := close
+        rth_mid := (rth_hi + rth_lo) / 2
+        
+        //if this is the first bar of the new RTH session, save its index
+        if not session[1]
+            index_rth_start := bar_index
+        
+        [true]
+    else
+        //we are in ON session
+        //if ON session just started, save RTH levels and reset everything
+        if session[1]
+            index_on_start := bar_index
+            //turn RTH values into yesterday's
+            yest_rth_op := rth_op
+            yest_rth_cl := rth_cl
+            yest_rth_hi := rth_hi
+            yest_rth_lo := rth_lo
+            yest_rth_mid := rth_mid
+            //reset variables
+            index_rth_start := na
+            on_hi := na
+            on_lo := na
+            rth_op := na
+            rth_cl := na
+            rth_hi := na
+            rth_lo := na
+            rth_mid := na
+
+        //calculate ON values
+        on_hi := na(on_hi) or high > on_hi[1] ? high : on_hi[1]
+        on_lo := na(on_lo) or low < on_lo[1] ? low : on_lo[1]
+        on_mid := (on_hi + on_lo) / 2
+
+        [true]
+    
+    //create all lines and labels in last bar and update their position
+    if barstate.islast
+        //draw levels
+        //today's RTH levels
+        var op_line = todop ? line.new(index_rth_start, rth_op, index_rth_start + nbarsforward, rth_op, xloc=xloc.bar_index, color=todopcol, width=todopwidth, style=line.style_dotted) : na
+        var hi_line = todhi ? line.new(index_rth_start, rth_hi, index_rth_start + nbarsforward, rth_hi, xloc=xloc.bar_index, color=todhicol, width=todhiwidth) : na
+        var lo_line = todlo ? line.new(index_rth_start, rth_lo, index_rth_start + nbarsforward, rth_lo, xloc=xloc.bar_index, color=todlocol, width=todlowidth) : na
+        //ON levels
+        var onhi_line = onhi ? line.new(index_on_start, on_hi, index_on_start + nbarsforward, on_hi, xloc=xloc.bar_index, color=onhicol, width=onhiwidth) : na
+        var onlo_line = onlo ? line.new(index_on_start, on_lo, index_on_start + nbarsforward, on_lo, xloc=xloc.bar_index, color=onlocol, width=onlowidth) : na
+        //yesterday's RTH levels
+        var rthcl_line = rthcl ? line.new(index_on_start, yest_rth_cl, index_on_start + yest_offset, yest_rth_cl, xloc=xloc.bar_index, color=rthclcol, width=rthclwidth) : na
+        var rthop_line = rthop ? line.new(index_on_start, yest_rth_op, index_on_start + yest_offset, yest_rth_op, xloc=xloc.bar_index, color=rthopcol, width=rthopwidth, style=line.style_dotted) : na
+        var rthhi_line = rthhi ? line.new(index_on_start, yest_rth_hi, index_on_start + yest_offset, yest_rth_hi, xloc=xloc.bar_index, color=rthhicol, width=rthhiwidth) : na
+        var rthlo_line = rthlo ? line.new(index_on_start, yest_rth_lo, index_on_start + yest_offset, yest_rth_lo, xloc=xloc.bar_index, color=rthlocol, width=rthlowidth) : na
+
+        //draw labels
+        //today
+        var label_op = todop ? label.new(bar_index + nbarsforward, rth_op, xloc=xloc.bar_index, text=display_value ? 'open ' + str.tostring(nround(rth_op)) : 'op', style=label.style_none, textcolor=todopcol, textalign =text.align_left, size=l_size) : na
+        var label_hi = todhi ? label.new(bar_index + nbarsforward, rth_hi, xloc=xloc.bar_index, text=display_value ? 'HOD ' + str.tostring(nround(rth_hi)) : 'hi', style=label.style_none, textcolor=todhicol, textalign =text.align_left, size=l_size) : na
+        var label_lo = todlo ? label.new(bar_index + nbarsforward, rth_lo, xloc=xloc.bar_index, text=display_value ? 'LOD ' + str.tostring(nround(rth_lo)) : 'lo', style=label.style_none, textcolor=todlocol, textalign =text.align_left, size=l_size) : na
+        //overnight
+        var label_on_hi = onhi ? label.new(bar_index + nbarsforward, on_hi, xloc=xloc.bar_index, text=display_value ? 'OVNH ' + str.tostring(nround(on_hi)) : 'ON.hi', style=label.style_none, textcolor=onhicol, textalign =text.align_left, size=l_size) : na
+        var label_on_lo = onlo ? label.new(bar_index + nbarsforward, on_lo, xloc=xloc.bar_index, text=display_value ? 'OVNL ' + str.tostring(nround(on_lo)) : 'ON.lo', style=label.style_none, textcolor=onlocol, textalign =text.align_left, size=l_size) : na
+        //yesterday
+        var label_rth_cl = rthcl ? label.new(bar_index + yest_offset, yest_rth_cl, xloc=xloc.bar_index, text=display_value ? 'Prior Close ' + str.tostring(nround(yest_rth_cl)) : 'y.RTH.cl', style=label.style_none, textcolor=rthclcol, textalign = text.align_left, size=l_size) : na
+        var label_rth_op = rthop ? label.new(bar_index + yest_offset, yest_rth_op, xloc=xloc.bar_index, text=display_value ? 'Prior Open ' + str.tostring(nround(yest_rth_op)) : 'y.RTH.op', style=label.style_none, textcolor=rthopcol, textalign = text.align_left, size=l_size) : na
+        var label_rth_hi = rthhi ? label.new(bar_index + yest_offset, yest_rth_hi, xloc=xloc.bar_index, text=display_value ? 'PH ' + str.tostring(nround(yest_rth_hi)) : 'y.RTH.hi', style=label.style_none, textcolor=rthhicol, textalign = text.align_left, size=l_size) : na
+        var label_rth_lo = rthlo ? label.new(bar_index + yest_offset, yest_rth_lo, xloc=xloc.bar_index, text=display_value ? 'PL ' + str.tostring(nround(yest_rth_lo)) : 'y.RTH.lo', style=label.style_none, textcolor=rthlocol, textalign = text.align_left, size=l_size) : na
+
+        
+        //update vertical location of lines and labels and label price if displayed
+        //today's
+        if rth_op != rth_op[1]
+            line.set_y1(op_line, rth_op)
+            line.set_y2(op_line, rth_op)
+            label.set_y(label_op, rth_op)
+            if display_value
+                label.set_text(label_op, 'open ' + str.tostring(nround(rth_op)))
+        if rth_hi != rth_hi[1]
+            line.set_y1(hi_line, rth_hi)
+            line.set_y2(hi_line, rth_hi)
+            label.set_y(label_hi, rth_hi)
+            if display_value
+                label.set_text(label_hi, 'HOD ' + str.tostring(nround(rth_hi)))
+        if rth_lo != rth_lo[1]
+            line.set_y1(lo_line, rth_lo)
+            line.set_y2(lo_line, rth_lo)
+            label.set_y(label_lo, rth_lo)
+            if display_value
+                label.set_text(label_lo, 'LOD ' + str.tostring(nround(rth_lo)))
+       
+        if on_hi != on_hi[1]
+            line.set_y1(onhi_line, on_hi)
+            line.set_y2(onhi_line, on_hi)
+            label.set_y(label_on_hi, on_hi)
+            if display_value
+                label.set_text(label_on_hi, 'OVNH ' + str.tostring(nround(on_hi)))
+        if on_lo != on_lo[1]
+            line.set_y1(onlo_line, on_lo)
+            line.set_y2(onlo_line, on_lo)
+            label.set_y(label_on_lo, on_lo)
+            if display_value
+                label.set_text(label_on_lo, 'OVNL ' + str.tostring(nround(on_lo)))
+       
+        if yest_rth_cl != yest_rth_cl[1]
+            line.set_y1(rthcl_line, yest_rth_cl)
+            line.set_y2(rthcl_line, yest_rth_cl)
+            label.set_y(label_rth_cl, yest_rth_cl)
+            if display_value
+                label.set_text(label_rth_cl, 'Prior Close ' + str.tostring(nround(yest_rth_cl)))
+        if yest_rth_op != yest_rth_op[1]
+            line.set_y1(rthop_line, yest_rth_op)
+            line.set_y2(rthop_line, yest_rth_op)
+            label.set_y(label_rth_op, yest_rth_op)
+            if display_value
+                label.set_text(label_rth_op, 'Prior Open ' + str.tostring(nround(yest_rth_op)))
+        if yest_rth_hi != yest_rth_hi[1]
+            line.set_y1(rthhi_line, yest_rth_hi)
+            line.set_y2(rthhi_line, yest_rth_hi)
+            label.set_y(label_rth_hi, yest_rth_hi)
+            if display_value
+                label.set_text(label_rth_hi, 'PH ' + str.tostring(nround(yest_rth_hi)))
+        if yest_rth_lo != yest_rth_lo[1]
+            line.set_y1(rthlo_line, yest_rth_lo)
+            line.set_y2(rthlo_line, yest_rth_lo)
+            label.set_y(label_rth_lo, yest_rth_lo)
+            if display_value
+                label.set_text(label_rth_lo, 'PL ' + str.tostring(nround(yest_rth_lo)))
+       
+        
+  
+        //move right end of all lines
+        line.set_x2(op_line, bar_index + nbarsforward)
+        line.set_x2(hi_line, bar_index + nbarsforward)
+        line.set_x2(lo_line, bar_index + nbarsforward)
+        line.set_x2(onhi_line, bar_index + nbarsforward)
+        line.set_x2(onlo_line, bar_index + nbarsforward)
+        line.set_x2(rthcl_line, bar_index + yest_offset)
+        line.set_x2(rthop_line, bar_index + yest_offset)
+        line.set_x2(rthhi_line, bar_index + yest_offset)
+        line.set_x2(rthlo_line, bar_index + yest_offset)
+
+        //move all labels horizontally
+        label.set_x(label_op, bar_index + nbarsforward)
+        label.set_x(label_hi, bar_index + nbarsforward)
+        label.set_x(label_lo, bar_index + nbarsforward)
+        label.set_x(label_on_hi, bar_index + nbarsforward)
+        label.set_x(label_on_lo, bar_index + nbarsforward)
+        label.set_x(label_rth_cl, bar_index + yest_offset)
+        label.set_x(label_rth_op, bar_index + yest_offset)
+        label.set_x(label_rth_hi, bar_index + yest_offset)
+        label.set_x(label_rth_lo, bar_index + yest_offset)
+
+        //move start of all lines if session changes
+        if index_rth_start != index_rth_start[1]
+            line.set_x1(op_line, index_rth_start)
+            line.set_x1(hi_line, index_rth_start)
+            line.set_x1(lo_line, index_rth_start)
+        
+        if index_on_start != index_on_start[1]
+            line.set_x1(onhi_line, index_on_start)
+            line.set_x1(onlo_line, index_on_start)
+            line.set_x1(rthcl_line, index_on_start)
+            line.set_x1(rthop_line, index_on_start)
+            line.set_x1(rthhi_line, index_on_start)
+            line.set_x1(rthlo_line, index_on_start)
+
+
+//@version=5
+
+
+
+//Daily high and low
+dailyhigh = request.security(syminfo.tickerid, 'D', high)
+dailylow = request.security(syminfo.tickerid, 'D', low)
+
+//Yesterday high and low
+previousdayhigh = request.security(syminfo.tickerid, 'D', high[1])
+previousdaylow = request.security(syminfo.tickerid, 'D', low[1])
+PreMarketHours = input.session('1600-0930:1234567', 'USA Pre-Market Hours')
+//Premarket high and low
+t = time('1440', '0400-0930:23456')  // 1440 is the number of minutes in a whole day.
+is_first = na(t[1]) and not na(t) or t[1] < t
+ending_hour = 9
+ending_minute = 30
+
+pm_high = float(na)
+pm_low = float(na)
+k = int(na)
+
+if is_first and barstate.isnew and (hour < ending_hour or hour >= 16 or hour == ending_hour and minute < ending_minute)
+    pm_high := high
+    pm_low := low
+    pm_low
+else
+    pm_high := pm_high[1]
+    pm_low := pm_low[1]
+    pm_low
+
+if high > pm_high and (hour < ending_hour or hour >= 1600 or hour == ending_hour and minute < ending_minute)
+    pm_high := high
+    pm_high
+
+if low < pm_low and (hour < ending_hour or hour >= 1600 or hour == ending_hour and minute < ending_minute)
+    pm_low := low
+    pm_low
+
+LastOnly = true
+
+if LastOnly == true
+    k := -9999
+    k
+else
+    k := 0
+    k
+
+    //Pre market high low
+ti = time('1440', '0400-0930:23456')  // 1440 is the number of minutes in a whole day.
+is_first1 = na(ti[1]) and not na(ti) or ti[1] < ti
+ending_hour1 = 09
+ending_minute1 = 30
+
+ah_high = float(na)
+ah_low = float(na)
+g = int(na)
+
+if is_first1 and barstate.isnew and (hour < ending_hour1 or hour >= 20 or hour == ending_hour1 and minute < ending_minute1)
+    ah_high := high
+    ah_low := low
+    ah_low
+else
+    ah_high := ah_high[1]
+    ah_low := ah_low[1]
+    ah_low
+
+if high > ah_high and (hour < ending_hour1 or hour >= 2000 or hour == ending_hour1 and minute < ending_minute1)
+    ah_high := high
+    ah_high
+
+if low < ah_low and (hour < ending_hour1 or hour >= 2000 or hour == ending_hour1 and minute < ending_minute1)
+    ah_low := low
+    ah_low
+
+LastOnly1 = true
+
+if LastOnly1 == true
+    g := -9999
+    g
+else
+    g := 0
+    g
+
+
+// VAR
+TimeIsAllowed = not na(time(timeframe.period, PreMarketHours))
+NewSession = TimeIsAllowed and not TimeIsAllowed[1]
+
+var float refHigh = na
+refHigh := TimeIsAllowed and not TimeIsAllowed[1] ? high : TimeIsAllowed and TimeIsAllowed[1] ? high > refHigh ? high : refHigh : refHigh
+var float refLow = na
+refLow := TimeIsAllowed and not TimeIsAllowed[1] ? low : TimeIsAllowed and TimeIsAllowed[1] ? low < refLow ? low : refLow : refLow
+
+var int x = na
+x := NewSession ? time : x
+
+var int l01_x1_s1 = na
+var int l01_x2_s1 = na
+var float l01_y1_s1 = na
+var float l01_y2_s1 = na
+var int l02_x1_s1 = na
+var int l02_x2_s1 = na
+var float l02_y1_s1 = na
+var float l02_y2_s1 = na
+
+var l01 = line(na)
+var l01_s1 = line(na)
+var l02 = line(na)
+var l02_s1 = line(na)
+
+var int counter = 0
+var float sum = na
+
+
+// current session
+if TimeIsAllowed and not NewSession
+    counter += 1
+    sum += close
+    line.delete(l01)
+    line.delete(l02)
+   
+// set previous values
+if not TimeIsAllowed and TimeIsAllowed[1] and not NewSession
+    l01_x1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x1(l01), 0)
+    l01_x2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x2(l01), 0)
+    l01_y1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y1(l01), 0)
+    l01_y2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y2(l01), 0)
+    l02_x1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x1(l02), 0)
+    l02_x2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_x2(l02), 0)
+    l02_y1_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y1(l02), 0)
+    l02_y2_s1 := ta.valuewhen(not TimeIsAllowed and TimeIsAllowed[1] and not NewSession, line.get_y2(l02), 0)
+    l02_y2_s1
+    
+//Just a variable here for the label coordinates
+td = time - time[5]
+
+//Daily high and low lines
+plot(dailyhigh, style=plot.style_line, title='Daily high', color=color.new(#1b5e20, 0), linewidth=1, trackprice=true, offset=k)
+dh = label.new(x=time + td, y=dailyhigh, text='HOD', xloc=xloc.bar_time, style=label.style_none, textcolor=#1b5e20, size=size.small, textalign=text.align_right)
+label.delete(dh[1])
+
+plot(dailylow, style=plot.style_line, title='Daily low', color=color.new(#b71c1c, 0), linewidth=1, trackprice=true, offset=k)
+dl = label.new(x=time + td, y=dailylow, text='LOD', xloc=xloc.bar_time, style=label.style_none, textcolor=#b71c1c, size=size.small, textalign=text.align_right)
+label.delete(dl[1])
+
+//Previous day high and low lines
+plot(previousdayhigh, style=plot.style_line, title='Yesterday\'s high', color=color.new(#a5d6a7, 0), linewidth=1, trackprice=true, offset=k)
+pdh = label.new(x=time + td, y=previousdayhigh, text='PH', xloc=xloc.bar_time, style=label.style_none, textcolor=#a5d6a7, size=size.small, textalign=text.align_right)
+label.delete(pdh[1])
+
+plot(previousdaylow, style=plot.style_line, title='Yesterday\'s low', color=color.new(#f8bbd0, 0), linewidth=1, trackprice=true, offset=k)
+pdl = label.new(x=time + td, y=previousdaylow, text='PL', xloc=xloc.bar_time, style=label.style_none, textcolor=#f8bbd0, size=size.small, textalign=text.align_right)
+label.delete(pdl[1])
+
+//Overnight High Low
+plot(refHigh, style=plot.style_line, title='ONH', trackprice=true, color=color.new(#4caf50, 0), linewidth=1, offset=k)
+pmh = label.new(x=time + td, y=refHigh, text='ONH', xloc=xloc.bar_time, style=label.style_none, textcolor=#4caf50, size=size.small, textalign=text.align_right)
+label.delete(pmh[1])
+
+plot(refLow, style=plot.style_line, title='ONL', trackprice=true, color=color.new(#f44336, 0), linewidth=1, offset=k)
+pml = label.new(x=time + td, y=refLow, text='ONL', xloc=xloc.bar_time, style=label.style_none, textcolor=#f44336, size=size.small, textalign=text.align_right)
+label.delete(pml[1])
+
+//Premarket high and low lines
+plot(ah_high, style=plot.style_line, title='Pre market High', trackprice=true, color=color.new(#679eca, 0), linewidth=1, offset=k)
+ahh = label.new(x=time + td, y=ah_high, text='___PMH  ', xloc=xloc.bar_time, style=label.style_none, textcolor=#679eca, size=size.small, textalign=text.align_right)
+label.delete(ahh[1])
+
+plot(ah_low, style=plot.style_line, title='Pre market Low', trackprice=true, color=color.new(#679eca, 0), linewidth=1, offset=k)
+ahl = label.new(x=time + td, y=ah_low, text='___PML  ', xloc=xloc.bar_time, style=label.style_none, textcolor=#679eca, size=size.small, textalign=text.align_right)
+label.delete(ahl[1])
