@@ -20,7 +20,7 @@ xshortEMAInput = input.int(title='Short Term Daily EMA', minval=1, step=1, defva
 longSMA = ta.sma(close, longSMAInput)
 mediumSMA = ta.sma(close, mediumSMAInput)
 shortSMA = ta.sma(close, shortSMAInput)
-xshortEMA = ta.sma(close, xshortEMAInput)
+xshortEMA = ta.ema(close, xshortEMAInput)
 
 // Grab the Daily SMAs for the ticker
 plotLongSMA = request.security(syminfo.tickerid, 'D', longSMA)
