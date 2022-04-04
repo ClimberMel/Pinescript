@@ -16,11 +16,27 @@ shortSMAInput = input.int(title='Short Term Daily SMA', minval=10, step=1, defva
 xshortEMAshow = input.bool(true, "Show Daily EMA?", inline = "01")
 xshortEMAInput = input.int(title='Short Term Daily EMA', minval=1, step=1, defval=20)
 
+// Input for Gator - Show (Yes, No) and variables
+jawLength = input.int(13, minval=1, title="Jaw Length")
+plotShow = input.bool(true, "Show Gator", inline = "01")
+
+// Some variables for Gator
+color GREEN = #008000
+color BLUE  = #2962FF
+
 // Evaluate SMAs
 longSMA = ta.sma(close, longSMAInput)
 mediumSMA = ta.sma(close, mediumSMAInput)
 shortSMA = ta.sma(close, shortSMAInput)
 xshortEMA = ta.ema(close, xshortEMAInput)
+
+// Evaluate Gator
+smma(src, length) =>
+	smma =  0.0
+	smma := na(smma[1]) ? ta.sma(src, length) : (smma[1] * (length - 1) + src) / length
+	smma
+
+jaw = smma(hl2, jawLength)
 
 // Grab the Daily SMAs for the ticker
 plotLongSMA = request.security(syminfo.tickerid, 'D', longSMA)
@@ -33,3 +49,7 @@ plot(plotLongSMA, linewidth=4, color=color.new(color.olive, 40))
 plot(plotMediumSMA, linewidth=4, color=color.new(color.red, 40))
 plot(plotShortSMA, linewidth=4, color=color.new(color.purple, 40))
 plot(xshortEMAshow ? plotxShortEMA : na, linewidth=4, color=color.new(color.yellow, 40))
+
+// Plot Gator
+plot(plotShow ? jaw : na, "Jaw", offset = 3, color=BLUE)
+plot(plotShow ? jaw : na, "Jaw", offset = 0, color=GREEN)
